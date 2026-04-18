@@ -108,9 +108,9 @@ function severityStyles(level: string): string {
     return "bg-error-container/40 text-on-error-container border border-error-container/50";
   }
   if (level === "moderate") {
-    return "bg-tertiary-container/50 text-on-tertiary-container border border-tertiary-container/40";
+    return "bg-orange-200 text-orange-800 border border-orange-300";
   }
-  return "bg-primary-fixed/15 text-primary border border-primary-fixed-dim/40";
+  return "bg-teal-200 text-teal-800 border border-teal-300";
 }
 
 const SymptomCheckPage: React.FC = () => {
@@ -229,7 +229,7 @@ const SymptomCheckPage: React.FC = () => {
 
     if (q.input_type === "single_choice" && q.options) {
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -273,7 +273,7 @@ const SymptomCheckPage: React.FC = () => {
     if (q.input_type === "multi_choice" && q.options) {
       const selected = Array.isArray(value) ? value : [];
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
