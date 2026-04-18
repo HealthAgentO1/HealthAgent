@@ -2,12 +2,12 @@
 
 ## Team
 
-| Person | Role | Owner Slice |
-|--------|------|-------------|
-| Carl (@carlgombert) | Infrastructure & Backend AI | Core Setup & Backend LLM Triage/API |
-| Zander (@zandermmcg) | Frontend Product Eng. | AI Symptom Chat UI & Session State |
-| Nico (@nico-gb) | Full-Stack Product Eng. | Care Matches & NPPES Search |
-| Peter (@petermckinley) | Full-Stack Product Eng. | Insurance & Appointment Workflows |
+| Person                 | Role                        | Owner Slice                         |
+| ---------------------- | --------------------------- | ----------------------------------- |
+| Carl (@carlgombert)    | Infrastructure & Backend AI | Core Setup & Backend LLM Triage/API |
+| Zander (@zandermmcg)   | Frontend Product Eng.       | AI Symptom Chat UI & Session State  |
+| Nico (@nico-gb)        | Full-Stack Product Eng.     | Care Matches & NPPES Search         |
+| Peter (@petermckinley) | Full-Stack Product Eng.     | Insurance & Appointment Workflows   |
 
 Rather than blocking on strictly sequential phases, developers own end-to-end "Vertical Slices" and use the API Contract to mock dependencies while running in parallel.
 
@@ -30,15 +30,24 @@ Get everyone unblocked before writing any feature code.
 All four work this end-to-end: backend services, API endpoints, and frontend UI ship together.
 
 **Backend:**
+
 - [ ] LLM Integration (LangChain / SDK) + System Prompt Engineering for Triage
-- [ ] Context window handling & extraction of urgency level (ER / urgent / routine)
+- [ ] context window handling & extraction of urgency level (ER / urgent / routine)
 - [ ] NPPES provider search by ZIP + specialty
+- [ ] NPPES Data Mapping & Sanitization (Nico)
 - [ ] Endpoint to validate manual insurance entry
 - [ ] Booking stub endpoint (mock confirmation + reference number)
+- [ ] Pre-visit Report Generation Engine (Peter)
 - [ ] Chat history endpoint & `/api/symptom/triage/` submission
+- [ ] User Session History on Dashboard (Carl)
 
 **Frontend:**
+
 - [ ] Symptom survey UI (free-text symptoms, insurer selection, structured follow-ups—not a chat transcript layout)
+- [ ] AI Chat Interface (conversational symptom gathering)
+- [ ] Add loading screens/shimmers for AI prompt responses (Carl)
+- [ ] Edit AI Chat context management (Peter)
+- [ ] Frontend Session Persistence & Recovery (Zander)
 - [ ] Manual Insurance Info capture form (aligned with survey; prototype may use a fixed carrier list)
 - [ ] Urgency result display (ER / urgent / routine)
 - [ ] Provider list with specialty + location
@@ -53,6 +62,7 @@ All four work this end-to-end: backend services, API endpoints, and frontend UI 
 Same approach — all four move to this feature together.
 
 **Backend:**
+
 - [ ] Lexigram medication extraction from free text
 - [ ] openFDA drug label + interaction lookup
 - [ ] Interaction risk scoring (critical / moderate / low)
@@ -62,6 +72,7 @@ Same approach — all four move to this feature together.
 - [ ] `/api/medication/check/` endpoint returning full shaped response
 
 **Frontend:**
+
 - [ ] Medication input form (free text)
 - [ ] Alert cards by severity (critical / moderate / low)
 - [ ] Safer alternatives display
@@ -105,24 +116,24 @@ Connect the two agents and build the cross-agent flow.
 
 ## Sync Points
 
-| Checkpoint | Done when |
-|-----------|-----------|
-| Setup complete | Everyone can run Django + React locally, API keys queued |
-| Feature 1 backend | Core AI Chat loop successfully resolving triage context |
-| Feature 1 done | Full conversational flow + insurance entry works end-to-end |
-| Feature 2 backend | Medication endpoint returning real openFDA data |
-| Feature 2 done | Full medication flow works end-to-end in browser |
-| Integration done | Cross-agent pre-visit report generated and displayed |
-| Demo ready | Error handling in place, full walkthrough succeeds |
+| Checkpoint        | Done when                                                   |
+| ----------------- | ----------------------------------------------------------- |
+| Setup complete    | Everyone can run Django + React locally, API keys queued    |
+| Feature 1 backend | Core AI Chat loop successfully resolving triage context     |
+| Feature 1 done    | Full conversational flow + insurance entry works end-to-end |
+| Feature 2 backend | Medication endpoint returning real openFDA data             |
+| Feature 2 done    | Full medication flow works end-to-end in browser            |
+| Integration done  | Cross-agent pre-visit report generated and displayed        |
+| Demo ready        | Error handling in place, full walkthrough succeeds          |
 
 ---
 
 ## Risk Log
 
-| Risk | Mitigation |
-|------|-----------|
-| LLM Hallucinations / Latency | Implement strict JSON schema parsing and fallback triage scores |
-| Lexigram onboarding slow | Regex fallback for common drug name extraction |
-| Feature 1 scope creep | Hard scope: AI chat + insurance form + providers + booking stub. |
-| Feature 2 scope creep | Hard scope: extraction + interactions + recalls. Cut safer alternatives if running over. |
-| Integration takes longer than expected | Cut Feature 3 polish, ship with basic cross-agent data flow |
+| Risk                                   | Mitigation                                                                               |
+| -------------------------------------- | ---------------------------------------------------------------------------------------- |
+| LLM Hallucinations / Latency           | Implement strict JSON schema parsing and fallback triage scores                          |
+| Lexigram onboarding slow               | Regex fallback for common drug name extraction                                           |
+| Feature 1 scope creep                  | Hard scope: AI chat + insurance form + providers + booking stub.                         |
+| Feature 2 scope creep                  | Hard scope: extraction + interactions + recalls. Cut safer alternatives if running over. |
+| Integration takes longer than expected | Cut Feature 3 polish, ship with basic cross-agent data flow                              |
