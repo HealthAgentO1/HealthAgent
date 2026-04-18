@@ -4,7 +4,13 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from users.views import RegisterView
 
-from .views import ExampleItemViewSet, SymptomSessionViewSet, ProvidersView
+from .views import (
+    ExampleItemViewSet,
+    ProvidersView,
+    SymptomSessionViewSet,
+    UserSymptomSessionRetrieveView,
+    UserSymptomSessionsListView,
+)
 from .views_symptom import SymptomChatView, SymptomSurveyLlmView
 
 router = DefaultRouter()
@@ -12,6 +18,12 @@ router.register(r"items", ExampleItemViewSet)
 router.register(r"symptom-sessions", SymptomSessionViewSet)
 
 urlpatterns = [
+    path(
+        "sessions/<uuid:session_public_id>/",
+        UserSymptomSessionRetrieveView.as_view(),
+        name="symptom-session-detail",
+    ),
+    path("sessions/", UserSymptomSessionsListView.as_view(), name="symptom-sessions-list"),
     path("symptom/chat/", SymptomChatView.as_view(), name="symptom-chat"),
     # Symptom Check SPA: two-phase JSON LLM (follow-up questions + condition list)
     path("symptom/survey-llm/", SymptomSurveyLlmView.as_view(), name="symptom-survey-llm"),

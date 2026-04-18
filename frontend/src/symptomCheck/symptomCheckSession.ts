@@ -32,6 +32,8 @@ export type SymptomCheckSessionSnapshot = {
   results: SymptomResultsPayload | null;
   pendingRequest: SymptomCheckPendingRequest;
   llmError: string | null;
+  /** Django `SymptomSession.public_id` after the follow-up LLM call; required for assessment. */
+  surveyBackendSessionId: string | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,6 +73,11 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
   if (!isPending(raw.pendingRequest)) return null;
   if (raw.llmError !== null && typeof raw.llmError !== "string") return null;
 
+  const surveyBackendSessionId =
+    typeof raw.surveyBackendSessionId === "string" && raw.surveyBackendSessionId.trim() !== ""
+      ? raw.surveyBackendSessionId.trim()
+      : null;
+
   return {
     version: SYMPTOM_CHECK_SESSION_VERSION,
     updatedAt: raw.updatedAt,
@@ -82,6 +89,7 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
     results: raw.results as SymptomResultsPayload | null,
     pendingRequest: raw.pendingRequest,
     llmError: raw.llmError,
+    surveyBackendSessionId,
   };
 }
 

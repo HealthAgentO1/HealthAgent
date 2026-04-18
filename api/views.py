@@ -1,11 +1,45 @@
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework import status
 import uuid
+
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
 from .models import ExampleItem, SymptomSession
-from .serializers import ExampleItemSerializer, SymptomSessionSerializer
+from .serializers import (
+    ExampleItemSerializer,
+    SymptomSessionListSerializer,
+    SymptomSessionResumeSerializer,
+    SymptomSessionSerializer,
+)
+
+class UserSymptomSessionsListView(generics.ListAPIView):
+    """
+    GET /api/sessions/ — authenticated user's symptom triage history for the dashboard.
+    """
+
+    serializer_class = SymptomSessionListSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return SymptomSession.objects.filter(user=self.request.user).order_by(
+            "-created_at", "-pk"
+        )
+
+
+class UserSymptomSessionRetrieveView(generics.RetrieveAPIView):
+    """
+    GET /api/sessions/<uuid>/ — resume payload for Symptom Check deep links from the dashboard.
+    """
+
+    serializer_class = SymptomSessionResumeSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = "public_id"
+    lookup_url_kwarg = "session_public_id"
+
+    def get_queryset(self):
+        return SymptomSession.objects.filter(user=self.request.user)
+
 
 class ExampleItemViewSet(viewsets.ModelViewSet):
     """

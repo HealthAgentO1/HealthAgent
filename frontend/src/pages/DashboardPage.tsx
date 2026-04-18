@@ -1,6 +1,39 @@
 import React from "react";
+import { Link } from "react-router-dom";
+import { useSymptomSessions } from "../api/queries";
+
+function formatSessionTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(d);
+  } catch {
+    return iso;
+  }
+}
+
+function triageBadgeClasses(level: string | null): string {
+  if (level === "emergency") {
+    return "bg-error-container/50 text-on-error-container border-error-container/40";
+  }
+  if (level === "urgent") {
+    return "bg-tertiary-container/50 text-on-tertiary-container border-tertiary-container/40";
+  }
+  if (level === "routine") {
+    return "bg-primary-fixed/15 text-primary border-primary-fixed-dim/40";
+  }
+  return "bg-surface-container-high text-on-surface-variant border-outline-variant/30";
+}
+
+function triageLabel(level: string | null): string {
+  if (!level) return "Triage pending";
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
 
 const DashboardPage: React.FC = () => {
+  const { data: sessions, isLoading, isError, error } = useSymptomSessions();
   return (
     <div className="p-6 md:p-10 lg:p-12">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -146,106 +179,103 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Recent Activity & Alerts */}
+          {/* Past symptom triage sessions */}
           <div className="col-span-1 md:col-span-12">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="font-headline text-2xl font-bold text-primary">
-                Recent Activity &amp; Alerts
-              </h3>
-              <a
-                className="font-body text-sm font-semibold text-primary hover:text-primary-container transition-colors flex items-center"
-                href="#"
+            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-6">
+              <div>
+                <h3 className="font-headline text-2xl font-bold text-primary">
+                  Past symptom checks
+                </h3>
+                <p className="font-body text-sm text-on-surface-variant mt-1">
+                  Triage sessions saved to your account.
+                </p>
+              </div>
+              <Link
+                className="font-body text-sm font-semibold text-primary hover:text-primary-container transition-colors inline-flex items-center shrink-0"
+                to="/symptom-check"
               >
-                View Full History
-                <span className="material-symbols-outlined text-sm ml-1">
-                  arrow_forward
-                </span>
-              </a>
+                New symptom check
+                <span className="material-symbols-outlined text-sm ml-1">arrow_forward</span>
+              </Link>
             </div>
-            <div className="flex flex-col gap-4">
-              {/* Warning Alert */}
-              <div className="bg-surface-container-lowest rounded-lg p-5 shadow-ambient border-ghost flex flex-col sm:flex-row sm:items-center gap-5 hover:bg-surface-bright transition-colors duration-200">
-                <div className="w-12 h-12 rounded-full bg-error-container text-on-error-container flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined icon-fill">
-                    warning
-                  </span>
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <h4 className="font-headline text-base font-bold text-on-surface">
-                      Interaction Warning Detected
-                    </h4>
-                    <span className="bg-error text-on-error text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      Review Required
-                    </span>
-                  </div>
-                  <p className="font-body text-sm text-on-surface-variant">
-                    Potential mild interaction between newly prescribed{" "}
-                    <strong className="text-on-surface">Amoxicillin</strong> and
-                    existing{" "}
-                    <strong className="text-on-surface">Lisinopril</strong>.
-                  </p>
-                </div>
-                <div className="mt-4 sm:mt-0 shrink-0">
-                  <button className="bg-secondary-container text-on-secondary-container font-headline text-sm font-bold py-2 px-4 rounded hover:opacity-90 transition-opacity w-full sm:w-auto">
-                    Consult Pharmacist
-                  </button>
-                </div>
-              </div>
 
-              {/* Info Alert */}
-              <div className="bg-surface-container-lowest rounded-lg p-5 shadow-ambient border-ghost flex flex-col sm:flex-row sm:items-center gap-5 hover:bg-surface-bright transition-colors duration-200">
-                <div className="w-12 h-12 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined icon-fill">
-                    check_circle
-                  </span>
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <h4 className="font-headline text-base font-bold text-on-surface">
-                      Lab Results Available
-                    </h4>
-                    <span className="bg-surface-container-low text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      Today, 9:00 AM
-                    </span>
-                  </div>
-                  <p className="font-body text-sm text-on-surface-variant">
-                    Your comprehensive metabolic panel results from Central Lab
-                    have been uploaded.
-                  </p>
-                </div>
-                <div className="mt-4 sm:mt-0 shrink-0">
-                  <button className="bg-transparent text-primary font-headline text-sm font-bold py-2 px-4 rounded border border-primary hover:bg-primary hover:text-white transition-colors w-full sm:w-auto">
-                    View Report
-                  </button>
-                </div>
+            {isLoading ? (
+              <div className="rounded-xl border border-ghost bg-surface-container-lowest p-10 text-center font-body text-on-surface-variant">
+                Loading your sessions…
               </div>
-
-              {/* Routine Alert */}
-              <div className="bg-surface-container-lowest rounded-lg p-5 shadow-ambient border-ghost flex flex-col sm:flex-row sm:items-center gap-5 hover:bg-surface-bright transition-colors duration-200 opacity-80">
-                <div className="w-12 h-12 rounded-full bg-surface-container-high text-on-surface-variant flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined">event</span>
-                </div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-1">
-                    <h4 className="font-headline text-base font-bold text-on-surface">
-                      Upcoming Appointment Reminder
-                    </h4>
-                    <span className="bg-surface-container-low text-on-surface-variant text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
-                      In 3 Days
-                    </span>
-                  </div>
-                  <p className="font-body text-sm text-on-surface-variant">
-                    Annual physical with Dr. Sarah Jenkins at Oakwood Clinic.
-                  </p>
-                </div>
-                <div className="mt-4 sm:mt-0 shrink-0 flex gap-2">
-                  <button className="text-primary font-body text-sm font-semibold hover:underline">
-                    Details
-                  </button>
-                </div>
+            ) : isError ? (
+              <div
+                className="rounded-xl border border-error-container/40 bg-error-container/10 p-6 font-body text-sm text-on-error-container"
+                role="alert"
+              >
+                {error instanceof Error
+                  ? error.message
+                  : "Could not load symptom history. Try again later."}
               </div>
-            </div>
+            ) : !sessions?.length ? (
+              <div className="rounded-xl border border-dashed border-outline-variant/40 bg-surface-container-lowest/80 p-10 md:p-14 text-center">
+                <div className="w-14 h-14 rounded-full bg-primary-fixed/15 text-primary mx-auto flex items-center justify-center mb-5">
+                  <span className="material-symbols-outlined text-[28px]">stethoscope</span>
+                </div>
+                <h4 className="font-headline text-lg font-bold text-on-surface mb-2">
+                  No symptom checks yet
+                </h4>
+                <p className="font-body text-sm text-on-surface-variant max-w-md mx-auto mb-6">
+                  When you complete a triage interview, it will appear here with the urgency
+                  level and a short summary.
+                </p>
+                <Link
+                  className="inline-flex items-center gap-2 bg-primary text-on-primary font-headline text-sm font-bold py-3 px-6 rounded-lg shadow-ambient hover:opacity-95 transition-opacity"
+                  to="/symptom-check"
+                >
+                  Start a symptom check
+                  <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                </Link>
+              </div>
+            ) : (
+              <ul className="flex flex-col gap-4">
+                {sessions.map((s) => (
+                  <li key={s.session_id}>
+                    <Link
+                      aria-label={`Open symptom session from ${formatSessionTimestamp(s.created_at)}`}
+                      className="block bg-surface-container-lowest rounded-xl p-5 md:p-6 shadow-ambient border-ghost hover:bg-surface-bright transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                      to={`/symptom-check?session=${encodeURIComponent(s.session_id)}`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                        <div className="flex items-start gap-4 min-w-0 flex-1">
+                          <div className="w-12 h-12 rounded-full bg-secondary-container/40 text-on-secondary-container flex items-center justify-center shrink-0">
+                            <span className="material-symbols-outlined icon-fill">chat</span>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2 mb-2">
+                              <span
+                                className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${triageBadgeClasses(s.triage_level)}`}
+                              >
+                                {triageLabel(s.triage_level)}
+                              </span>
+                              <span className="font-body text-xs text-on-surface-variant">
+                                {formatSessionTimestamp(s.created_at)}
+                              </span>
+                              <span className="font-body text-xs font-semibold text-primary">
+                                Open
+                                <span className="material-symbols-outlined text-sm align-middle ml-0.5">
+                                  chevron_right
+                                </span>
+                              </span>
+                            </div>
+                            <p className="font-body text-sm text-on-surface line-clamp-3">
+                              {s.summary.trim()
+                                ? s.summary
+                                : "No summary recorded for this session yet."}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
       </div>

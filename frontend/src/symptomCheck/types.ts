@@ -32,6 +32,11 @@ export type FollowUpQuestionsPayload = {
   questions: FollowUpQuestion[];
 };
 
+/** Follow-up LLM response plus Django `SymptomSession.public_id` from `POST /symptom/survey-llm/`. */
+export type FollowUpQuestionsWithSession = FollowUpQuestionsPayload & {
+  session_id: string;
+};
+
 export type ConditionAssessment = {
   title: string;
   explanation: string;
@@ -59,6 +64,8 @@ export type SymptomLlmRequestBody = {
   phase: SymptomLlmPhase;
   system_prompt: string;
   user_payload: Record<string, unknown>;
+  /** Continues the same `SymptomSession` row as the follow-up phase (condition assessment). */
+  session_id?: string;
 };
 
 /** Per-question value in component state; shape depends on `input_type`. */

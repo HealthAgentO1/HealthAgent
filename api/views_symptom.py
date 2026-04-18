@@ -9,6 +9,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import SymptomSession
+from .services.survey_session_persist import (
+    append_survey_turn,
+    apply_condition_assessment_summary,
+)
 from .services.symptom_llm import (
     complete_symptom_survey_turn,
     conversation_log_to_chat_messages,
@@ -34,6 +38,7 @@ class SymptomSurveyLlmSerializer(serializers.Serializer):
     phase = serializers.ChoiceField(choices=["followup_questions", "condition_assessment"])
     system_prompt = serializers.CharField(min_length=1, max_length=200_000)
     user_payload = serializers.JSONField()
+    session_id = serializers.UUIDField(required=False, allow_null=True)
 
 
 def _iso_z(dt):
@@ -166,4 +171,28 @@ class SymptomSurveyLlmView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        return Response({"raw_text": raw_text, "phase": ser.validated_data["phase"]})
+        phase = ser.validated_data["phase"]
+        session_uuid = ser.validated_data.get("session_id")
+        if session_uuid:
+            session = get_object_or_404(
+                SymptomSession,
+                public_id=session_uuid,
+                user=request.user,
+            )
+        else:
+            session = SymptomSession.objects.create(user=request.user)
+
+        append_survey_turn(session, phase=phase, user_payload=user_payload, raw_text=raw_text)
+        if phase == "condition_assessment":
+            apply_condition_assessment_summary(
+                session, raw_text=raw_text, user_payload=user_payload
+            )
+        session.save()
+
+        return Response(
+            {
+                "raw_text": raw_text,
+                "phase": phase,
+                "session_id": str(session.public_id),
+            }
+        )

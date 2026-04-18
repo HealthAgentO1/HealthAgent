@@ -5,15 +5,23 @@
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
  */
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { fetchSymptomSessionResume } from "../api/queries";
 import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
+import { parseJsonObjectFromLlm } from "../symptomCheck/parseLlmJson";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
   type StructuredFollowUpAnswer,
 } from "../symptomCheck/symptomLlmClient";
+import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
+import {
+  validateFollowUpQuestionsPayload,
+  validateSymptomResultsPayload,
+} from "../symptomCheck/validatePayloads";
 import {
   SYMPTOM_CHECK_SESSION_VERSION,
   clearSymptomCheckSession,
@@ -76,6 +84,20 @@ function normalizeInsuranceId(id: string): InsuranceId | "" {
   return found ? found.id : "";
 }
 
+/** Map insurer label from LLM payloads / resume API back to a known option id when possible. */
+function insuranceIdFromLabel(label: string): InsuranceId | "" {
+  const t = label.trim().toLowerCase();
+  if (!t) return "";
+  for (const o of INSURANCE_OPTIONS) {
+    if (o.label.toLowerCase() === t) return o.id;
+  }
+  for (const o of INSURANCE_OPTIONS) {
+    const ol = o.label.toLowerCase();
+    if (t.includes(ol) || ol.includes(t)) return o.id;
+  }
+  return "";
+}
+
 function buildCostNarrative(
   insurerLabel: string,
   hospital: (typeof MOCK_HOSPITALS)[number],
@@ -136,6 +158,8 @@ function severityStyles(level: string): string {
 }
 
 const SymptomCheckPage: React.FC = () => {
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<FlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
@@ -148,9 +172,13 @@ const SymptomCheckPage: React.FC = () => {
   const [resultsEntered, setResultsEntered] = useState(false);
   /** Tracks in-flight LLM phases for UI disable + session resume (see `symptomCheckSession`). */
   const [pendingRequest, setPendingRequest] = useState<SymptomCheckPendingRequest>(null);
+  /** Django `SymptomSession.public_id` after follow-up questions; sent with condition assessment. */
+  const [surveyBackendSessionId, setSurveyBackendSessionId] = useState<string | null>(null);
+  const [urlSessionHydrating, setUrlSessionHydrating] = useState(false);
+  const [resumeChatNotice, setResumeChatNotice] = useState(false);
 
   const followUpMutation = useMutation({
-    mutationFn: (vars: { symptoms: string; insuranceLabel: string }) =>
+    mutationFn: (vars: { symptoms: string; insuranceLabel: string }): Promise<FollowUpQuestionsWithSession> =>
       requestFollowUpQuestions(vars),
   });
 
@@ -159,6 +187,7 @@ const SymptomCheckPage: React.FC = () => {
       symptoms: string;
       insuranceLabel: string;
       followUpAnswers: StructuredFollowUpAnswer[];
+      sessionId: string;
     }) => requestConditionAssessment(vars),
   });
 
@@ -173,10 +202,101 @@ const SymptomCheckPage: React.FC = () => {
    */
   const [sessionGate, setSessionGate] = useState<"need-choice" | "ready">(() => {
     if (typeof window === "undefined") return "ready";
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("session")?.trim()) return "ready";
     const snap = readSymptomCheckSession();
     if (snap && isRecoverableSymptomCheckSession(snap)) return "need-choice";
     return "ready";
   });
+
+  /** Deep link from dashboard: `?session=<uuid>` loads server state and skips the local resume modal. */
+  useEffect(() => {
+    const sid = searchParams.get("session")?.trim();
+    if (!sid) return;
+
+    let cancelled = false;
+    setSessionGate("ready");
+    setUrlSessionHydrating(true);
+    setLlmError(null);
+    setResumeChatNotice(false);
+
+    void (async () => {
+      try {
+        clearSymptomCheckSession();
+        const data = await fetchSymptomSessionResume(sid);
+        if (cancelled) return;
+
+        setSurveyBackendSessionId(sid);
+        setSymptoms(data.symptoms ?? "");
+        setInsurance(insuranceIdFromLabel(data.insurance_label ?? ""));
+        setPendingRequest(null);
+        setResultsEntered(false);
+
+        if (data.resume_step === "followup" && data.followup_raw_text) {
+          try {
+            const parsed = parseJsonObjectFromLlm(data.followup_raw_text);
+            const { questions } = validateFollowUpQuestionsPayload(parsed);
+            setFollowUpQuestions(questions);
+            setFollowUpAnswers(buildInitialAnswers(questions));
+            setResults(null);
+            setStep("followup");
+          } catch {
+            setLlmError("Could not restore follow-up questions from this session.");
+            setStep("intake");
+            setFollowUpQuestions([]);
+            setFollowUpAnswers({});
+          }
+        } else if (data.resume_step === "results" && data.results_raw_text) {
+          try {
+            const parsed = parseJsonObjectFromLlm(data.results_raw_text);
+            const resPayload = validateSymptomResultsPayload(parsed);
+            setFollowUpQuestions([]);
+            setFollowUpAnswers({});
+            setResults(resPayload);
+            setStep("results");
+          } catch {
+            setLlmError("Could not restore results from this session.");
+            setStep("intake");
+          }
+        } else if (data.resume_step === "chat") {
+          setFollowUpQuestions([]);
+          setFollowUpAnswers({});
+          setResults(null);
+          setStep("intake");
+          setResumeChatNotice(true);
+        } else {
+          setFollowUpQuestions([]);
+          setFollowUpAnswers({});
+          setResults(null);
+          setStep("intake");
+        }
+
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("session");
+            return next;
+          },
+          { replace: true },
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setLlmError(
+            e instanceof Error
+              ? e.message
+              : "Unable to load this session. Try again from the dashboard.",
+          );
+          setStep("intake");
+        }
+      } finally {
+        if (!cancelled) setUrlSessionHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams]);
 
   const intakeValid = symptoms.trim().length > 0 && insurance !== "";
 
@@ -196,6 +316,7 @@ const SymptomCheckPage: React.FC = () => {
         symptoms: input.symptoms,
         insuranceLabel: input.insuranceLabel,
       });
+      setSurveyBackendSessionId(data.session_id);
       setFollowUpQuestions(data.questions);
       setFollowUpAnswers(buildInitialAnswers(data.questions));
       setResults(null);
@@ -213,9 +334,16 @@ const SymptomCheckPage: React.FC = () => {
     insuranceLabel: string;
     questions: FollowUpQuestion[];
     answers: Record<string, FollowUpAnswer>;
+    backendSessionId: string | null;
   }) => {
     if (!followUpAnswersSatisfy(input.questions, input.answers)) {
       setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      return;
+    }
+    if (!input.backendSessionId) {
+      setLlmError(
+        "This session is missing server data. Please start a new symptom check from the beginning.",
+      );
       return;
     }
     setLlmError(null);
@@ -232,9 +360,11 @@ const SymptomCheckPage: React.FC = () => {
         symptoms: input.symptoms,
         insuranceLabel: input.insuranceLabel,
         followUpAnswers: structured,
+        sessionId: input.backendSessionId,
       });
       setResults(payload);
       setStep("results");
+      void queryClient.invalidateQueries({ queryKey: ["symptom-sessions"] });
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to load assessment results.");
     } finally {
@@ -259,6 +389,7 @@ const SymptomCheckPage: React.FC = () => {
       insuranceLabel: insurerLabel,
       questions: followUpQuestions,
       answers: followUpAnswers,
+      backendSessionId: surveyBackendSessionId,
     });
   };
 
@@ -277,6 +408,7 @@ const SymptomCheckPage: React.FC = () => {
       results,
       pendingRequest,
       llmError,
+      surveyBackendSessionId,
     };
     writeSymptomCheckSession(snapshot);
   }, [
@@ -289,6 +421,7 @@ const SymptomCheckPage: React.FC = () => {
     results,
     pendingRequest,
     llmError,
+    surveyBackendSessionId,
   ]);
 
   const applySnapshotToState = (snap: SymptomCheckSessionSnapshot) => {
@@ -299,6 +432,7 @@ const SymptomCheckPage: React.FC = () => {
     setFollowUpAnswers(snap.followUpAnswers);
     setResults(snap.results);
     setLlmError(snap.llmError);
+    setSurveyBackendSessionId(snap.surveyBackendSessionId);
     setPendingRequest(null);
   };
 
@@ -327,6 +461,7 @@ const SymptomCheckPage: React.FC = () => {
         insuranceLabel: label,
         questions: snap.followUpQuestions,
         answers: snap.followUpAnswers,
+        backendSessionId: snap.surveyBackendSessionId,
       });
     }
   };
@@ -341,6 +476,8 @@ const SymptomCheckPage: React.FC = () => {
     setResults(null);
     setLlmError(null);
     setPendingRequest(null);
+    setSurveyBackendSessionId(null);
+    setResumeChatNotice(false);
     setSessionGate("ready");
   };
 
@@ -356,6 +493,8 @@ const SymptomCheckPage: React.FC = () => {
     setResults(null);
     setLlmError(null);
     setPendingRequest(null);
+    setSurveyBackendSessionId(null);
+    setResumeChatNotice(false);
     setResultsEntered(false);
   };
 
@@ -569,6 +708,19 @@ const SymptomCheckPage: React.FC = () => {
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12 pb-16">
       <div className="max-w-6xl mx-auto relative">
+        {urlSessionHydrating ? (
+          <div
+            aria-busy="true"
+            aria-live="polite"
+            className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/45 p-6"
+          >
+            <div className="h-10 w-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <p className="font-body text-sm font-medium text-on-primary">
+              Opening your saved session…
+            </p>
+          </div>
+        ) : null}
+
         {sessionGate === "need-choice" ? (
           <div
             aria-labelledby="symptom-session-resume-title"
@@ -632,6 +784,28 @@ const SymptomCheckPage: React.FC = () => {
             Step {stepIndex} of 3
           </div>
         </header>
+
+        {resumeChatNotice && step === "intake" ? (
+          <div
+            className="mb-8 rounded-xl border border-primary/30 bg-primary-fixed/10 px-4 py-4 md:px-6 md:py-5 flex flex-col sm:flex-row sm:items-center gap-4"
+            role="status"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="font-headline text-sm font-bold text-primary mb-1">Conversational session</p>
+              <p className="font-body text-sm text-on-surface-variant">
+                This entry was created with the live chat interview, not the structured Symptom Check
+                questionnaire. You can start a new guided check below whenever you are ready.
+              </p>
+            </div>
+            <button
+              className="shrink-0 font-headline text-sm font-semibold text-primary border border-primary/40 rounded-lg px-4 py-2 hover:bg-primary/5 transition-colors"
+              type="button"
+              onClick={() => setResumeChatNotice(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
 
         {step === "intake" && (
           <section
