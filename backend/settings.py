@@ -170,6 +170,13 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-# Core AI Agent (Deepseek); optional until symptom/LLM code calls the provider.
+# Deepseek AI configuration (used for symptom assessment LLM)
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_API_BASE = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com")
+DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+
+# Legacy OpenAI configuration (kept for reference)
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", None)  # Optional for custom endpoints
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4")
+
