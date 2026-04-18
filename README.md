@@ -7,17 +7,18 @@ An AI-powered health assistant with two autonomous agents: one that triages symp
 ## Getting Started
 
 ### Prerequisites
-- Python 
-- Node.js 
-- PostgreSQL
-- API keys: Infermedica, Lexigram, openFDA (free), Healthcare.gov
+- Python 3.10+
+- Node.js (for the frontend)
+- PostgreSQL (only if you run the backend on the host instead of Docker)
+- API keys as described in `.env.example` (for example Deepseek for the Core AI agent)
 
-### Backend setup
+### Backend setup (host machine)
+From the **repository root** (where `manage.py` lives):
+
 ```bash
-cd backend
-python -m venv venv && source venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        
+cp .env.example .env
 python manage.py migrate
 python manage.py runserver
 ```
@@ -29,11 +30,20 @@ npm install
 npm run dev
 ```
 
-### Full stack (Docker)
+### Full stack (Docker: Postgres + Django)
+Uses `.env` at the repo root for `DJANGO_SECRET_KEY`, database passwords, `DEEPSEEK_API_KEY`, and other variables. Compose overrides `POSTGRES_HOST` to reach the `db` service; you do not need to change that in `.env` for Docker.
+
 ```bash
 cp .env.example .env
-docker compose up
+# Edit .env: set DJANGO_SECRET_KEY and any API keys (never commit .env)
+
+docker compose up --build
 ```
+
+- API: `http://127.0.0.1:8000` (Django runs `migrate` on startup, then `runserver` with **live reload**; the project directory is bind-mounted into the container).
+- Postgres: `localhost:5432` (same credentials as in `.env`).
+
+Run the Vite dev server on your host when you need the UI (`cd frontend && npm run dev`). Point it at the API with `VITE_API_URL=http://127.0.0.1:8000/api` in `frontend/.env` if needed.
 
 ---
 

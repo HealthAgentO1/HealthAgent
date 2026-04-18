@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   db:
@@ -12,6 +12,37 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-myprojectuser} -d ${POSTGRES_DB:-myprojectdb}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  django:
+    build: .
+    container_name: myproject_django
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-myprojectdb}
+      POSTGRES_USER: ${POSTGRES_USER:-myprojectuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+    depends_on:
+      db:
+        condition: service_healthy
 
 volumes:
   postgres_data:
