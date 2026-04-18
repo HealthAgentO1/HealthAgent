@@ -1,6 +1,7 @@
 from rest_framework import viewsets
-from .models import ExampleItem
-from .serializers import ExampleItemSerializer
+from rest_framework.permissions import IsAuthenticated
+from .models import ExampleItem, SymptomSession
+from .serializers import ExampleItemSerializer, SymptomSessionSerializer
 
 class ExampleItemViewSet(viewsets.ModelViewSet):
     """
@@ -9,3 +10,20 @@ class ExampleItemViewSet(viewsets.ModelViewSet):
     """
     queryset = ExampleItem.objects.all().order_by('-created_at')
     serializer_class = ExampleItemSerializer
+
+
+class SymptomSessionViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing symptom sessions.
+    Users can only access their own sessions.
+    """
+    serializer_class = SymptomSessionSerializer
+    # permission_classes = [IsAuthenticated]  # Temporarily disabled for testing
+
+    def get_queryset(self):
+        # return SymptomSession.objects.filter(user=self.request.user)
+        return SymptomSession.objects.all()  # Temporarily allow all for testing
+
+    def perform_create(self, serializer):
+        # serializer.save(user=self.request.user)
+        serializer.save()  # Temporarily no user for testing

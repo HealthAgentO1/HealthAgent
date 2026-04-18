@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { useCreateSymptomSession } from "../api/queries";
 
 type FlowStep = "intake" | "followup" | "results";
 
@@ -87,6 +88,8 @@ const SymptomCheckPage: React.FC = () => {
   const [onset, setOnset] = useState<OnsetId | "">("");
   const [painRating, setPainRating] = useState(5);
 
+  const createSessionMutation = useCreateSymptomSession();
+
   const intakeValid = symptoms.trim().length > 0 && insurance !== "";
 
   const followUpValid = onset !== "";
@@ -103,7 +106,24 @@ const SymptomCheckPage: React.FC = () => {
 
   const goToResults = () => {
     if (!followUpValid) return;
-    setStep("results");
+    // Submit insurance details to create a symptom session
+    const insuranceDetails = {
+      plan: insurance,
+      provider: insuranceLabel(insurance),
+    };
+    createSessionMutation.mutate(
+      { insurance_details: insuranceDetails },
+      {
+        onSuccess: () => {
+          setStep("results");
+        },
+        onError: (error) => {
+          console.error("Failed to create symptom session:", error);
+          // Still proceed to results for now, or handle error
+          setStep("results");
+        },
+      }
+    );
   };
 
   const restart = () => {
@@ -348,13 +368,13 @@ const SymptomCheckPage: React.FC = () => {
                 </button>
                 <button
                   className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
-                  disabled={!followUpValid}
+                  disabled={!followUpValid || createSessionMutation.isPending}
                   type="button"
                   onClick={goToResults}
                 >
-                  See results
+                  {createSessionMutation.isPending ? "Submitting..." : "See results"}
                   <span className="material-symbols-outlined text-lg">
-                    monitoring
+                    {createSessionMutation.isPending ? "sync" : "monitoring"}
                   </span>
                 </button>
               </div>
