@@ -8,6 +8,7 @@ const INSURANCE_OPTIONS = [
   { id: "elevance", label: "Elevance" },
   { id: "aetna", label: "Aetna" },
   { id: "centene", label: "Centene" },
+  { id: "other", label: "Other (Enter manually)" },
 ] as const;
 
 type InsuranceId = (typeof INSURANCE_OPTIONS)[number]["id"];
@@ -85,12 +86,20 @@ const SymptomCheckPage: React.FC = () => {
   const [step, setStep] = useState<FlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
+  const [manualInsurance, setManualInsurance] = useState({
+    provider: "",
+    plan: "",
+    memberId: "",
+  });
   const [onset, setOnset] = useState<OnsetId | "">("");
   const [painRating, setPainRating] = useState(5);
 
   const createSessionMutation = useCreateSymptomSession();
 
-  const intakeValid = symptoms.trim().length > 0 && insurance !== "";
+  const intakeValid = symptoms.trim().length > 0 && (
+    (insurance !== "" && insurance !== "other") ||
+    (insurance === "other" && manualInsurance.provider.trim().length > 0)
+  );
 
   const followUpValid = onset !== "";
 
@@ -107,10 +116,16 @@ const SymptomCheckPage: React.FC = () => {
   const goToResults = () => {
     if (!followUpValid) return;
     // Submit insurance details to create a symptom session
-    const insuranceDetails = {
-      plan: insurance,
-      provider: insuranceLabel(insurance),
-    };
+    const insuranceDetails = insurance === "other"
+      ? {
+          plan: manualInsurance.plan,
+          provider: manualInsurance.provider,
+          memberId: manualInsurance.memberId,
+        }
+      : {
+          plan: insurance,
+          provider: insuranceLabel(insurance),
+        };
     createSessionMutation.mutate(
       { insurance_details: insuranceDetails },
       {
@@ -130,6 +145,11 @@ const SymptomCheckPage: React.FC = () => {
     setStep("intake");
     setSymptoms("");
     setInsurance("");
+    setManualInsurance({
+      provider: "",
+      plan: "",
+      memberId: "",
+    });
     setOnset("");
     setPainRating(5);
   };
@@ -235,6 +255,81 @@ const SymptomCheckPage: React.FC = () => {
                     );
                   })}
                 </div>
+                {insurance === "other" && (
+                  <div className="mt-4 space-y-4 p-4 bg-surface-container-low rounded-lg border border-outline-variant/20">
+                    <h4 className="text-sm font-semibold text-on-surface mb-3">
+                      Enter your insurance details
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label
+                          className="block text-sm font-medium text-on-surface mb-2"
+                          htmlFor="insurance-provider"
+                        >
+                          Insurance Provider
+                          <span className="text-error ml-1" aria-hidden>
+                            *
+                          </span>
+                        </label>
+                        <input
+                          className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-lg px-3 py-2 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50"
+                          id="insurance-provider"
+                          placeholder="e.g., Blue Cross Blue Shield"
+                          type="text"
+                          value={manualInsurance.provider}
+                          onChange={(e) =>
+                            setManualInsurance(prev => ({
+                              ...prev,
+                              provider: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div>
+                        <label
+                          className="block text-sm font-medium text-on-surface mb-2"
+                          htmlFor="insurance-plan"
+                        >
+                          Plan Name
+                        </label>
+                        <input
+                          className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-lg px-3 py-2 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50"
+                          id="insurance-plan"
+                          placeholder="e.g., PPO Plus"
+                          type="text"
+                          value={manualInsurance.plan}
+                          onChange={(e) =>
+                            setManualInsurance(prev => ({
+                              ...prev,
+                              plan: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label
+                        className="block text-sm font-medium text-on-surface mb-2"
+                        htmlFor="member-id"
+                      >
+                        Member ID (optional)
+                      </label>
+                      <input
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-lg px-3 py-2 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50"
+                        id="member-id"
+                        placeholder="Your member identification number"
+                        type="text"
+                        value={manualInsurance.memberId}
+                        onChange={(e) =>
+                          setManualInsurance(prev => ({
+                            ...prev,
+                            memberId: e.target.value,
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
               </fieldset>
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
