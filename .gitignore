@@ -28,3 +28,4 @@ db.sqlite3
 # OS / editor
 .DS_Store
 .idea/
+backend/__pycache__/settings.cpython-310.pyc
