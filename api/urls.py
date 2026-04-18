@@ -4,11 +4,12 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from users.views import RegisterView
 
-from .views import ExampleItemViewSet
+from .views import ExampleItemViewSet, SymptomSessionViewSet
 from .views_symptom import SymptomChatView, SymptomSurveyLlmView
 
 router = DefaultRouter()
 router.register(r"items", ExampleItemViewSet)
+router.register(r"symptom-sessions", SymptomSessionViewSet)
 
 urlpatterns = [
     path("symptom/chat/", SymptomChatView.as_view(), name="symptom-chat"),

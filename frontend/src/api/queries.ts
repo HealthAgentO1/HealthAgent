@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiClient } from "./client";
 
 // Define the shape of our provider data
@@ -10,6 +10,26 @@ export interface Provider {
   distance_approx: string;
 }
 
+// Symptom session data
+export interface SymptomSession {
+  id: number;
+  ai_conversation_log: any[];
+  triage_level: string | null;
+  provider_npi: string | null;
+  insurance_details: any | null;
+  booking_status: string;
+  pre_visit_report: any | null;
+  created_at: string;
+}
+
+export interface CreateSymptomSessionData {
+  insurance_details: {
+    plan: string;
+    provider: string;
+  };
+  // Add other fields as needed
+}
+
 // Example API fetcher using our Axios client
 const fetchProviders = async (zip: string, specialty?: string): Promise<Provider[]> => {
   const { data } = await apiClient.get<Provider[]>("/providers/", {
@@ -18,11 +38,30 @@ const fetchProviders = async (zip: string, specialty?: string): Promise<Provider
   return data;
 };
 
+// Create symptom session
+const createSymptomSession = async (data: CreateSymptomSessionData): Promise<SymptomSession> => {
+  const { data: response } = await apiClient.post<SymptomSession>("/symptom-sessions/", data);
+  return response;
+};
+
 // Example React Query hook that developers can adapt for their slices
 export const useProviders = (zip: string, specialty?: string) => {
   return useQuery({
     queryKey: ["providers", { zip, specialty }],
     queryFn: () => fetchProviders(zip, specialty),
     enabled: !!zip, // Only run the query if a zip code is provided
+  });
+};
+
+// Book appointment for a symptom session
+const bookAppointment = async (sessionId: number): Promise<SymptomSession> => {
+  const { data } = await apiClient.post<SymptomSession>(`/symptom-sessions/${sessionId}/book/`);
+  return data;
+};
+
+// Hook for booking appointments
+export const useBookAppointment = () => {
+  return useMutation({
+    mutationFn: bookAppointment,
   });
 };

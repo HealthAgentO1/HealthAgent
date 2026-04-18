@@ -3,6 +3,7 @@
  * via `symptomLlmClient` (JWT on `apiClient`). Hospitals and cost blurbs stay static mocks.
  */
 import React, { useMemo, useState } from "react";
+import { useCreateSymptomSession } from "../api/queries";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
 import {
   requestConditionAssessment,

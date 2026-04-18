@@ -48,6 +48,7 @@ class SymptomSession(models.Model):
         choices=BookingStatus.choices,
         default=BookingStatus.PENDING,
     )
+    confirmation_number = models.CharField(max_length=20, null=True, blank=True)
     pre_visit_report = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
