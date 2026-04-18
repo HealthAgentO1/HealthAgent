@@ -38,12 +38,13 @@ flowchart TD
     style C1 fill:#F0997B,color:#4A1B0C,stroke:#D85A30
 ```
 
-## Symptom survey and LLM (implemented in frontend)
+## Symptom survey and LLM (frontend + Django)
 
-The **Symptom Check** flow (`/symptom-check`) is implemented in the React app as a **three-step survey**: intake (free text + insurer), dynamic follow-up questions, then illustrative differentials and facility/cost sections.
+The **Symptom Check** flow (`/symptom-check`) is a **three-step survey** in React: intake (free text + insurer), dynamic follow-up questions, then illustrative differentials and facility/cost sections.
 
-- **Prompts** live in versioned text files under `frontend/src/symptomCheck/prompts/` (`followup_context.txt`, `results_context.txt`). The client loads them at build time (Vite `?raw` imports), concatenates them into the `system_prompt` field of a JSON request body, and attaches structured `user_payload` (symptoms, insurer label, and follow-up answers on the second call).
-- **Two LLM-shaped calls** (not chat-first): (1) after intake, generate a variable list of follow-up questions with typed controls (`single_choice`, `multi_choice`, `text`, `scale_1_10`); (2) after the questionnaire, return possible conditions, severities, and a **`care_taxonomy`** object for future server-side routing (currently logged in the browser console only; not shown in the UI).
-- **Default behavior** is a **mock adapter** (no network): fixed JSON responses exercise parsing, validation, and UI. When **`VITE_SYMPTOM_LLM_URL`** is set in `frontend/.env`, the same payload is `POST`ed to that URL; the integration task can swap the mock for a Django proxy or external LLM gateway without changing the survey UX.
+- **Prompts** for the survey live in `frontend/src/symptomCheck/prompts/` (`followup_context.txt`, `results_context.txt`). The SPA loads them at build time (Vite `?raw`), sends them as `system_prompt` on each call, and sends structured `user_payload` (symptoms, insurer label, and follow-up answers on the second call).
+- **Runtime:** the SPA `POST`s to **`/api/symptom/survey-llm/`** (`SymptomSurveyLlmView`) with `{ phase, system_prompt, user_payload }`, using **`apiClient`** (same base URL as the rest of the app) and **`Authorization: Bearer`** when `access_token` is in `localStorage`. Django calls the configured OpenAI-compatible or Anthropic API (keys in `.env`) and returns `{ raw_text, phase }`; the browser parses and validates JSON before rendering.
+- **Two phases** (not chat-first): (1) `followup_questions` → variable `questions[]` with `input_type` for controls; (2) `condition_assessment` → conditions, severities, and **`care_taxonomy`** for future routing (logged in the browser console only for now).
+- **Conversational chat** (`POST /api/symptom/chat/`) uses a separate system prompt file on the server: `api/prompts/symptom_chat_system.txt` (JSON reply with `assistant_message`, `triage_level`, etc.).
 
-Longer term, the diagram above still applies: orchestration, session persistence, and authoritative triage may move behind **Django** (`API → S1 → A1`) while the frontend keeps the same JSON contracts or a thin wrapper around them.
+The diagram above remains the target for deeper orchestration (sessions, NPPES); the survey path already routes LLM traffic through **Django** for credential safety.

@@ -30,7 +30,7 @@ npm install
 npm run dev
 ```
 
-Optional: create `frontend/.env` or `frontend/.env.local` with `VITE_API_URL` (Django API base) and, when you have an LLM gateway for Symptom Check, **`VITE_SYMPTOM_LLM_URL`** (see `docs/sympton-to-care.md`). If `VITE_SYMPTOM_LLM_URL` is omitted, the symptom flow uses built-in mock JSON responses.
+Optional: create `frontend/.env` or `frontend/.env.local` with **`VITE_API_URL`** (Django API base, e.g. `http://127.0.0.1:8000/api`). Symptom Check uses **`POST /api/symptom/survey-llm/`** with JWT auth; see `docs/sympton-to-care.md`.
 
 ### Full stack (Docker: Postgres + Django)
 Uses `.env` at the repo root for `DJANGO_SECRET_KEY`, database passwords, `DEEPSEEK_API_KEY`, and other variables. Compose overrides `POSTGRES_HOST` to reach the `db` service; you do not need to change that in `.env` for Docker.

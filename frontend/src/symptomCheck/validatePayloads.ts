@@ -1,3 +1,7 @@
+/**
+ * Runtime guards for LLM JSON: narrow `unknown` to typed payloads and fail
+ * with clear errors so the UI can show a message instead of rendering bad data.
+ */
 import type {
   ConditionAssessment,
   FollowUpQuestion,
@@ -17,6 +21,7 @@ const SEVERITIES = new Set(["mild", "moderate", "severe"]);
 
 type Severity = "mild" | "moderate" | "severe";
 
+/** Narrows after `SEVERITIES.has` checks so TypeScript matches the union type. */
 function asSeverity(value: string): Severity {
   if (!SEVERITIES.has(value)) {
     throw new Error(`Invalid severity: ${value}`);
@@ -40,6 +45,7 @@ function validateOption(value: unknown): value is { id: string; label: string } 
 export function validateFollowUpQuestionsPayload(
   value: unknown,
 ): FollowUpQuestionsPayload {
+  // Enforce stable `id`s so answers round-trip on the second LLM call.
   if (!isRecord(value) || !Array.isArray(value.questions)) {
     throw new Error("Invalid follow-up payload: missing questions array.");
   }
@@ -124,6 +130,7 @@ export function validateFollowUpQuestionsPayload(
   return { questions };
 }
 
+/** Second-call payload: differentials, severities, and internal `care_taxonomy`. */
 export function validateSymptomResultsPayload(value: unknown): SymptomResultsPayload {
   if (!isRecord(value)) {
     throw new Error("Invalid results payload: not an object.");

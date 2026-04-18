@@ -1,3 +1,7 @@
+/**
+ * Symptom Check: three-step flow. Steps 2–3 call Django `POST /api/symptom/survey-llm/`
+ * via `symptomLlmClient` (JWT on `apiClient`). Hospitals and cost blurbs stay static mocks.
+ */
 import React, { useMemo, useState } from "react";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
 import {
@@ -59,6 +63,7 @@ function buildCostNarrative(
   return `Based on publicly posted in-network prices for ${insurerLabel} tied to ${hospital.name} for ${hospital.careExample}, many plans show negotiated amounts roughly between ${fmt(hospital.costLow)} and ${fmt(hospital.costHigh)}, with a common midpoint around ${fmt(hospital.costMid)}.\n\nThis is not your personal cost; your deductible/coinsurance can change what you pay.`;
 }
 
+/** Default control values so required validation and sliders start in a defined state. */
 function buildInitialAnswers(questions: FollowUpQuestion[]): Record<string, FollowUpAnswer> {
   const out: Record<string, FollowUpAnswer> = {};
   for (const q of questions) {
@@ -76,6 +81,7 @@ function buildInitialAnswers(questions: FollowUpQuestion[]): Record<string, Foll
   return out;
 }
 
+/** Mirrors required flags from the LLM question list (optional questions can stay empty). */
 function followUpAnswersSatisfy(
   questions: FollowUpQuestion[],
   answers: Record<string, FollowUpAnswer>,
@@ -96,6 +102,7 @@ function followUpAnswersSatisfy(
   return true;
 }
 
+/** Tailwind bundles for overall / per-condition severity chips (mild | moderate | severe). */
 function severityStyles(level: string): string {
   if (level === "severe") {
     return "bg-error-container/40 text-on-error-container border border-error-container/50";
@@ -110,9 +117,11 @@ const SymptomCheckPage: React.FC = () => {
   const [step, setStep] = useState<FlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
+  // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
+  // Serializes Continue / See results while `requestFollowUpQuestions` or `requestConditionAssessment` runs.
   const [pendingRequest, setPendingRequest] = useState<null | "followup" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
 
@@ -125,6 +134,7 @@ const SymptomCheckPage: React.FC = () => {
     [insurance],
   );
 
+  /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
   const handleContinueToFollowUp = async () => {
     if (!intakeValid || pendingRequest) return;
     setLlmError(null);
@@ -145,6 +155,7 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
+  /** Step 2 → 3: second LLM request includes prompts + values for traceability in `user_payload`. */
   const handleSeeResults = async () => {
     if (!followUpValid || pendingRequest) return;
     setLlmError(null);
@@ -188,6 +199,10 @@ const SymptomCheckPage: React.FC = () => {
     setFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
+  /**
+   * LLM may emit a `none` option id (see mock in `symptomLlmClient`); selecting it clears
+   * other chips so “none of the above” stays mutually exclusive with other symptoms.
+   */
   const toggleMultiChoice = (question: FollowUpQuestion, optionId: string) => {
     const current = followUpAnswers[question.id];
     const selected = Array.isArray(current) ? [...current] : [];
@@ -208,6 +223,7 @@ const SymptomCheckPage: React.FC = () => {
     updateAnswer(question.id, next);
   };
 
+  /** Maps each `input_type` from the LLM to the same control patterns as the old static step. */
   const renderFollowUpQuestion = (q: FollowUpQuestion) => {
     const value = followUpAnswers[q.id];
 

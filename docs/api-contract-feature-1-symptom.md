@@ -1,7 +1,7 @@
 # API contract — Feature 1 (Symptom-to-Care)
 
 **Status:** Draft (pre-implementation)  
-**Version:** 1.0.1  
+**Version:** 1.0.2  
 **Base URL (dev):** `http://127.0.0.1:8000/api`  
 **Primary consumer:** React frontend (`VITE_API_URL` + Axios)
 
@@ -9,7 +9,7 @@ This document defines the HTTP contract for the symptom interview, triage submis
 
 **Related:** Domain behavior and data model context live in [sympton-to-care.md](./sympton-to-care.md).
 
-**Symptom Check survey LLM (as implemented today):** The three-step `/symptom-check` UI issues two structured “LLM” calls from the **browser** via `frontend/src/symptomCheck/symptomLlmClient.ts`, using prompt templates under `frontend/src/symptomCheck/prompts/`. By default responses are **mocked**; an optional `VITE_SYMPTOM_LLM_URL` can receive the same JSON payload. That path is **separate** from the draft HTTP resources below (`POST /symptom/chat/`, `POST /symptom/triage/`), which describe a future Django-backed chat and triage contract. When the backend owns the LLM, either align these contracts or version the API.
+**Symptom Check survey LLM:** The `/symptom-check` UI issues two `POST /api/symptom/survey-llm/` calls (authenticated). The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from `POST /symptom/chat/` (conversational JSON contract below).
 
 ---
 
@@ -19,7 +19,7 @@ This document defines the HTTP contract for the symptom interview, triage submis
 |------|------|
 | Format | `Content-Type: application/json` on bodies |
 | Paths | All paths below are relative to the API prefix `/api/` (e.g. full path `POST /api/symptom/chat/`) |
-| Auth | v1: unauthenticated unless/until `Authorization: Bearer <token>` is enabled; clients already send the header when a token exists |
+| Auth | JWT: clients send `Authorization: Bearer <access_token>` when present. **`POST /symptom/survey-llm/`** and **`POST /symptom/chat/`** require authentication in the current implementation. |
 | IDs | `session_id` is a UUID string |
 | Timestamps | ISO-8601 UTC strings where present (e.g. `2026-04-18T12:34:56Z`) |
 
@@ -54,7 +54,57 @@ Validation and request errors use HTTP **400**; not found **404**; server errors
 
 ---
 
-## 1. Symptom chat turn
+## 1. Symptom survey LLM (structured)
+
+**`POST /symptom/survey-llm/`**
+
+Runs one **stateless** survey turn for the React Symptom Check flow: either generating follow-up questions from intake data, or generating condition assessment JSON after follow-ups. The server calls the configured LLM with the provided `system_prompt` and a single synthetic user message whose content is `JSON.stringify(user_payload)`.
+
+### Request
+
+```json
+{
+  "phase": "followup_questions",
+  "system_prompt": "<full system instructions, typically from SPA prompt files>",
+  "user_payload": {
+    "symptoms": "…",
+    "insurance_label": "…"
+  }
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|--------|
+| `phase` | string | yes | `followup_questions` \| `condition_assessment` (echoed in response for debugging) |
+| `system_prompt` | string | yes | Non-empty; in production the SPA bundles known-good templates |
+| `user_payload` | object | yes | JSON object; second call typically includes `follow_up_answers` array |
+
+### Response **200 OK**
+
+```json
+{
+  "raw_text": "{ \"questions\": [ … ] }",
+  "phase": "followup_questions"
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `raw_text` | string | Model output; client MUST parse as JSON (may strip optional Markdown fences) |
+| `phase` | string | Same as request `phase` |
+
+### Errors
+
+| HTTP | When |
+|------|------|
+| **400** | Serializer validation (e.g. invalid `phase`, empty `system_prompt`) |
+| **401** | Missing or invalid JWT |
+| **502** | Upstream LLM or transport failure |
+| **503** | LLM not configured (e.g. missing API key) |
+
+---
+
+## 2. Symptom chat turn
 
 **`POST /symptom/chat/`**
 
@@ -98,7 +148,7 @@ Runs one conversational turn: persists (or creates) a symptom session, appends t
 
 ---
 
-## 2. Triage submission
+## 3. Triage submission
 
 **`POST /symptom/triage/`**
 
@@ -182,7 +232,7 @@ Submits the **full session** for structured triage: urgency, routing guidance, a
 
 ---
 
-## 3. NPPES provider proxy
+## 4. NPPES provider proxy
 
 **`GET /providers/`**
 
@@ -244,3 +294,4 @@ All developers MUST review this contract before Feature 1 implementation. Record
 |---------|------|---------|
 | 1.0 | 2026-04-18 | Initial contract for chat, triage, and providers endpoints |
 | 1.0.1 | 2026-04-18 | Documented parallel frontend Symptom Check LLM payload (`VITE_SYMPTOM_LLM_URL`, prompt files); clarifies relation to draft `/symptom/chat/` and `/symptom/triage/` |
+| 1.0.2 | 2026-04-18 | Added implemented `POST /symptom/survey-llm/`; SPA uses Django + JWT (removed browser-only mock path) |

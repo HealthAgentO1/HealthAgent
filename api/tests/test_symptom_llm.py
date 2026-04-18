@@ -1,9 +1,6 @@
 from django.test import SimpleTestCase, override_settings
 
-from api.services.symptom_llm import (
-    SYMPTOM_INTERVIEW_SYSTEM_PROMPT,
-    trim_chat_messages,
-)
+from api.services.symptom_llm import get_symptom_chat_system_prompt, trim_chat_messages
 
 
 class TrimChatMessagesTests(SimpleTestCase):
@@ -16,7 +13,7 @@ class TrimChatMessagesTests(SimpleTestCase):
             messages.append({"role": "assistant", "content": f"a{i} ok"})
 
         trimmed = trim_chat_messages(
-            SYMPTOM_INTERVIEW_SYSTEM_PROMPT,
+            get_symptom_chat_system_prompt(),
             messages,
             max_input_tokens=500,
         )

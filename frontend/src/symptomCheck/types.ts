@@ -1,3 +1,9 @@
+/**
+ * Shared TypeScript shapes for the Symptom Check “LLM as JSON API” contract.
+ * Field names align with `followup_context.txt` / `results_context.txt` so the
+ * same types work for mock data, a future HTTP gateway, and UI rendering.
+ */
+
 export type QuestionInputType =
   | "single_choice"
   | "multi_choice"
@@ -33,6 +39,7 @@ export type ConditionAssessment = {
   condition_severity: "mild" | "moderate" | "severe";
 };
 
+/** Returned on the second LLM call; intended for routing/NPPES follow-up, not patient display. */
 export type CareTaxonomy = {
   suggested_care_setting: string;
   taxonomy_codes: string[];
@@ -47,12 +54,14 @@ export type SymptomResultsPayload = {
 
 export type SymptomLlmPhase = "followup_questions" | "condition_assessment";
 
+/** POST body for `POST /api/symptom/survey-llm/` (matches `SymptomSurveyLlmSerializer`). */
 export type SymptomLlmRequestBody = {
   phase: SymptomLlmPhase;
   system_prompt: string;
   user_payload: Record<string, unknown>;
 };
 
+/** Per-question value in component state; shape depends on `input_type`. */
 export type FollowUpAnswer =
   | string
   | number

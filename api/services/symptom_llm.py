@@ -3,35 +3,25 @@ from __future__ import annotations
 import json
 import logging
 import re
+from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
-SYMPTOM_INTERVIEW_SYSTEM_PROMPT = """You are a clinical intake assistant for a telehealth-style symptom interview. \
-You are not a substitute for emergency services or a diagnosing clinician. \
-Be concise, empathetic, and ask one focused follow-up at a time when information is missing.
 
-You MUST respond with a single JSON object only. No markdown code fences, no prose before or after the JSON.
+def _prompts_dir() -> Path:
+    """Directory containing `symptom_chat_system.txt` (chat transcript API, not survey prompts)."""
+    return Path(__file__).resolve().parent.parent / "prompts"
 
-Required JSON shape (all keys required):
-{
-  "assistant_message": "string — text the patient will read as your reply",
-  "triage_level": "emergency" | "urgent" | "routine",
-  "reasoning": "string — brief clinical rationale for triage_level (for audit; do not diagnose definitively)",
-  "interview_complete": true | false
-}
 
-Rules for triage_level:
-- "emergency": possible life-threatening or time-critical symptoms (e.g. crushing chest pain, stroke signs, severe shortness of breath, major trauma, suspected sepsis).
-- "urgent": should be evaluated same day / next day but not clearly immediate emergency.
-- "routine": stable, primary-care appropriate, or still early in questioning with no red flags (use "routine" while gathering details if no concerning features).
-
-Set "interview_complete" to true only when you have enough structured information that a downstream triage step could reasonably proceed (chief complaint, key modifiers, red flags ruled in or out as far as possible from chat).
-
-If the user mentions self-harm, harm to others, or inability to breathe, direct them to emergency services in assistant_message and set triage_level to "emergency".
-"""
+@lru_cache(maxsize=1)
+def get_symptom_chat_system_prompt() -> str:
+    """System instructions for `POST /api/symptom/chat/` — loaded from disk, not inlined in views."""
+    path = _prompts_dir() / "symptom_chat_system.txt"
+    return path.read_text(encoding="utf-8").strip()
 
 
 def _encoding():
@@ -162,11 +152,30 @@ def _complete_anthropic(system_prompt: str, chat_messages: list[dict[str, str]])
     return block.text
 
 
-def run_symptom_turn(system_prompt: str, chat_messages: list[dict[str, str]]) -> dict[str, Any]:
-    """Call configured LLM provider and return parsed symptom JSON."""
+def complete_llm_chat(system_prompt: str, chat_messages: list[dict[str, str]]) -> str:
+    """Low-level completion: system + alternating user/assistant messages; returns raw model text."""
     provider = settings.LLM_PROVIDER
     if provider == "anthropic":
-        raw = _complete_anthropic(system_prompt, chat_messages)
-    else:
-        raw = _complete_openai(system_prompt, chat_messages)
+        return _complete_anthropic(system_prompt, chat_messages)
+    return _complete_openai(system_prompt, chat_messages)
+
+
+def run_symptom_turn(system_prompt: str, chat_messages: list[dict[str, str]]) -> dict[str, Any]:
+    """Call configured LLM provider and return parsed JSON for the conversational chat contract."""
+    raw = complete_llm_chat(system_prompt, chat_messages)
     return parse_symptom_response(raw)
+
+
+def complete_symptom_survey_turn(system_prompt: str, user_payload: dict[str, Any]) -> str:
+    """
+    Symptom Check survey: one user message containing JSON `user_payload`, arbitrary system prompt
+    (from the SPA: follow-up vs results prompt files). Returns raw model output for client-side parsing.
+    """
+    user_content = json.dumps(user_payload, ensure_ascii=False)
+    messages: list[dict[str, str]] = [{"role": "user", "content": user_content}]
+    trimmed = trim_chat_messages(
+        system_prompt,
+        messages,
+        settings.LLM_MAX_INPUT_TOKENS,
+    )
+    return complete_llm_chat(system_prompt, trimmed)
