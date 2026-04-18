@@ -1,28 +1,5 @@
-import React, { useState } from "react";
-import { useBookAppointment } from "../api/queries";
-
-const providers = [
-  {
-    name: "Dr. Sarah Jenkins, MD",
-    specialty: "Family Medicine • Board Certified",
-    distance: "2.4 miles",
-    nextAvail: "Tomorrow",
-    rating: "4.9",
-    reviews: 120,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuAvG6QodwNCAd7kB5FKexwqkLu81bWs9kH9Qot9I0JP2G14fKlKx4sJOfaJY9mYkkGi878HtdnfoawgLkLLsmXaT6uXXZdC76JskONit34hkT7u5qcuXiWSxWCvEvVGuvuEbPWHoBHugmA1U4Qrrzoke4FMy0UxHzYj0GyU3uFlrudNWpKgGo_QNV36TaUxk7dJZtNlgqBnfyDNCHIhVJyk6YZV0beMF0Bb1EoO51_P9_su8ytyPShcNT6PNZtK-xuXZWZhx_FJzDs",
-  },
-  {
-    name: "Dr. Michael Chen, DO",
-    specialty: "Internal Medicine • Geriatrics Focus",
-    distance: "3.8 miles",
-    nextAvail: "Thursday",
-    rating: "4.8",
-    reviews: 85,
-    image:
-      "https://lh3.googleusercontent.com/aida-public/AB6AXuDh9kWCN_4bRBsWRcknH-zrcLcDYWBBYnAGErNfY_h0cxPchuuzEvUrOYWL-lX7UT1WrwAMZjdbc5HGg8esuX0oxQJlubt4HaIChKS44ZBwG2poIZOXEnWrh0eiBfqsQmMBeZ6Z-JTxV3gTu3oOyBxdjaSmvBKWnhf-OdZpiqdSa4pkf4oJHRyjvOX5maGcYQo5F66Z0TDbWYl7yCpnxBbpU5G4n_8HJZmAcBtGW_JyRrE6OS8NjD91nrhjMW3YjnHxEsZnmomUtv8",
-  },
-];
+import React, { useState, useMemo } from "react";
+import { useBookAppointment, useProviders, Provider } from "../api/queries";
 
 type TriageLevel = 'emergency' | 'urgent' | 'routine';
 
@@ -69,20 +46,24 @@ const CareMatchesPage: React.FC = () => {
   const [bookingProvider, setBookingProvider] = useState<string | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
   const [triageLevel, setTriageLevel] = useState<TriageLevel>('routine');
+  const [zipCode, setZipCode] = useState('94107'); // Default to San Francisco area
+  const [specialty, setSpecialty] = useState<string>('');
   const [bookingDetails, setBookingDetails] = useState<{
     providerName: string;
     specialty: string;
     confirmationNumber: string;
     nextAvail: string;
   } | null>(null);
+  
   const bookAppointmentMutation = useBookAppointment();
+  const { data: liveProviders = [], isLoading, error } = useProviders(zipCode, specialty || undefined);
 
   // Mock session ID - in real app this would come from routing or context
   const sessionId = 1; // TODO: Get from actual session
   
   const urgencyConfig = getUrgencyBannerConfig(triageLevel);
 
-  const handleBookAppointment = (provider: (typeof providers)[0]) => {
+  const handleBookAppointment = (provider: Provider) => {
     setBookingProvider(provider.name);
     bookAppointmentMutation.mutate(sessionId, {
       onSuccess: (data) => {
@@ -90,7 +71,7 @@ const CareMatchesPage: React.FC = () => {
           providerName: provider.name,
           specialty: provider.specialty,
           confirmationNumber: data.confirmation_number,
-          nextAvail: provider.nextAvail,
+          nextAvail: 'Contact office for availability',
         });
         setShowConfirmation(true);
         setBookingProvider(null);
@@ -232,6 +213,26 @@ const CareMatchesPage: React.FC = () => {
 
         {/* Right: Provider Cards */}
         <div className="lg:col-span-8 flex flex-col gap-6">
+          {/* ZIP Code Input */}
+          <div className="bg-surface-container-low rounded-xl p-4 border border-outline-variant/10">
+            <label className="block text-sm font-semibold text-on-surface mb-2">
+              Search providers by ZIP code
+            </label>
+            <div className="flex gap-2">
+              <input
+                className="flex-1 bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-lg px-3 py-2 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50"
+                placeholder="Enter ZIP code (e.g., 94107)"
+                type="text"
+                value={zipCode}
+                onChange={(e) => setZipCode(e.target.value)}
+                maxLength="5"
+              />
+              <button className="px-4 py-2 rounded-lg gradient-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity">
+                Search
+              </button>
+            </div>
+          </div>
+
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-2xl font-headline font-bold text-primary">
               Recommended Providers
@@ -241,20 +242,53 @@ const CareMatchesPage: React.FC = () => {
               <span className="material-symbols-outlined text-sm">tune</span>
             </button>
           </div>
+
+          {/* Loading State */}
+          {isLoading && (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="animate-spin mb-4">
+                  <span className="material-symbols-outlined text-primary text-4xl">refresh</span>
+                </div>
+                <p className="text-on-surface-variant font-body">Searching for providers...</p>
+              </div>
+            </div>
+          )}
+
+          {/* Error State */}
+          {error && !isLoading && (
+            <div className="bg-error/10 border border-error rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <span className="material-symbols-outlined text-error mt-0.5">error</span>
+                <div>
+                  <h3 className="text-sm font-semibold text-error mb-1">Search Error</h3>
+                  <p className="text-sm text-on-surface-variant">
+                    Failed to load providers. Please check your ZIP code and try again.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Provider Cards */}
           <div className="space-y-4">
-            {providers.map((provider, idx) => (
+            {!isLoading && !error && liveProviders.length === 0 && (
+              <div className="text-center py-12">
+                <span className="material-symbols-outlined text-outline text-4xl mb-4 block">location_off</span>
+                <p className="text-on-surface-variant font-body">No providers found in this area. Try a different ZIP code.</p>
+              </div>
+            )}
+            {liveProviders.map((provider, idx) => (
               <article
                 key={idx}
                 className="bg-surface-container-lowest rounded-xl p-5 md:p-6 shadow-ambient border-ghost hover:-translate-y-1 transition-transform duration-300 group flex flex-col sm:flex-row gap-6"
               >
-                {/* Provider Image */}
+                {/* Provider Image - Show placeholder if no image available */}
                 <div className="flex flex-col items-center gap-3 shrink-0">
                   <div className="relative">
-                    <img
-                      alt={provider.name}
-                      className="w-24 h-24 md:w-28 md:h-28 rounded-full object-cover border-4 border-surface"
-                      src={provider.image}
-                    />
+                    <div className="w-24 h-24 md:w-28 md:h-28 rounded-full bg-surface-container flex items-center justify-center border-4 border-surface">
+                      <span className="material-symbols-outlined text-on-surface-variant text-3xl">person</span>
+                    </div>
                     <div className="absolute -bottom-2 right-0 bg-surface-container-lowest rounded-full p-1 border-ghost shadow-sm">
                       <span
                         className="material-symbols-outlined text-secondary text-lg"
@@ -266,7 +300,7 @@ const CareMatchesPage: React.FC = () => {
                   </div>
                   {/* Insurance Badge */}
                   <div className="bg-surface-container-high text-on-surface-variant text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-wider text-center w-full">
-                    Verify Insurance
+                    {provider.phone ? 'Verified' : 'Unverified'}
                   </div>
                 </div>
                 {/* Provider Details */}
@@ -276,29 +310,35 @@ const CareMatchesPage: React.FC = () => {
                       <h3 className="text-lg md:text-xl font-headline font-bold text-on-surface">
                         {provider.name}
                       </h3>
-                      <div className="flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-2 py-1 rounded-md">
-                        <span className="material-symbols-outlined text-base">
-                          location_on
-                        </span>
-                        {provider.distance}
-                      </div>
+                      {provider.distance_approx && (
+                        <div className="flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-2 py-1 rounded-md">
+                          <span className="material-symbols-outlined text-base">
+                            location_on
+                          </span>
+                          {provider.distance_approx}
+                        </div>
+                      )}
                     </div>
                     <p className="text-primary font-medium text-sm mb-3">
                       {provider.specialty}
                     </p>
                     <div className="flex flex-wrap gap-2 mb-4 md:mb-0">
-                      <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant bg-surface-container px-2 py-1 rounded">
-                        <span className="material-symbols-outlined text-[14px]">
-                          calendar_month
+                      {provider.npi && (
+                        <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant bg-surface-container px-2 py-1 rounded">
+                          <span className="material-symbols-outlined text-[14px]">
+                            badge
+                          </span>
+                          NPI: {provider.npi}
                         </span>
-                        Next avail: {provider.nextAvail}
-                      </span>
-                      <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant bg-surface-container px-2 py-1 rounded">
-                        <span className="material-symbols-outlined text-[14px]">
-                          star
+                      )}
+                      {provider.phone && (
+                        <span className="inline-flex items-center gap-1 text-xs text-on-surface-variant bg-surface-container px-2 py-1 rounded\">
+                          <span className="material-symbols-outlined text-[14px]">
+                            phone
+                          </span>
+                          {provider.phone}
                         </span>
-                        {provider.rating} ({provider.reviews} reviews)
-                      </span>
+                      )}
                     </div>
                   </div>
                   <div className="mt-auto pt-4 flex flex-col sm:flex-row gap-3 sm:items-center justify-end">
