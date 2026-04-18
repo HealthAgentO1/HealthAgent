@@ -19,9 +19,10 @@ class SymptomSessionAdmin(admin.ModelAdmin):
         "booking_status",
         "provider_npi",
         "created_at",
+        "updated_at",
     )
-    list_filter = ("triage_level", "booking_status", "created_at")
-    search_fields = ("user__email", "provider_npi")
+    list_filter = ("triage_level", "booking_status", "created_at", "updated_at")
+    search_fields = ("user__email", "provider_npi", "public_id")
     raw_id_fields = ("user",)
 
 
