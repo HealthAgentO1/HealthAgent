@@ -8,6 +8,8 @@ export interface Provider {
   specialty: string;
   address: string;
   distance_approx: string;
+  taxonomy_code?: string;
+  phone?: string;
 }
 
 // Symptom session data
