@@ -42,13 +42,13 @@ All four work this end-to-end: backend services, API endpoints, and frontend UI 
 - [ ] Chat history endpoint & `/api/symptom/triage/` submission
 
 **Frontend:**
-- [ ] AI Chat Interface (conversational symptom gathering)
-- [ ] Manual Insurance Info capture form
+- [ ] Symptom survey UI (free-text symptoms, insurer selection, structured follow-ups—not a chat transcript layout)
+- [ ] Manual Insurance Info capture form (aligned with survey; prototype may use a fixed carrier list)
 - [ ] Urgency result display (ER / urgent / routine)
 - [ ] Provider list with specialty + location
 - [ ] Booking confirmation screen
 
-**Done when:** A user can chat with the AI to describe symptoms, receive a triage result, manually enter insurance, see nearby providers, and get a mock booking confirmation.
+**Done when:** A user can complete the symptom survey, receive a triage result, enter or select insurance context, see nearby providers, and get a mock booking confirmation.
 
 ---
 
