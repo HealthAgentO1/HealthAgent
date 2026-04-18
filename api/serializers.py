@@ -17,6 +17,7 @@ class SymptomSessionSerializer(serializers.ModelSerializer):
             'provider_npi',
             'insurance_details',
             'booking_status',
+            'confirmation_number',
             'pre_visit_report',
             'created_at',
         ]

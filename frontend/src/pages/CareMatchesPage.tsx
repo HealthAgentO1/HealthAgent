@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import { useBookAppointment } from "../api/queries";
 
 const providers = [
   {
@@ -24,6 +25,27 @@ const providers = [
 ];
 
 const CareMatchesPage: React.FC = () => {
+  const [bookingProvider, setBookingProvider] = useState<string | null>(null);
+  const [confirmationNumber, setConfirmationNumber] = useState<string | null>(null);
+  const bookAppointmentMutation = useBookAppointment();
+
+  // Mock session ID - in real app this would come from routing or context
+  const sessionId = 1; // TODO: Get from actual session
+
+  const handleBookAppointment = (providerName: string) => {
+    setBookingProvider(providerName);
+    bookAppointmentMutation.mutate(sessionId, {
+      onSuccess: (data) => {
+        setConfirmationNumber(data.confirmation_number);
+        setBookingProvider(null);
+      },
+      onError: (error) => {
+        console.error("Failed to book appointment:", error);
+        setBookingProvider(null);
+        // In real app, show error message
+      },
+    });
+  };
   return (
     <div className="p-6 md:p-12 max-w-7xl mx-auto w-full">
       {/* Header */}
@@ -207,8 +229,16 @@ const CareMatchesPage: React.FC = () => {
                     <button className="px-4 py-2 rounded-lg text-primary font-semibold text-sm hover:bg-surface-container transition-colors border border-outline-variant/30 text-center">
                       View Profile
                     </button>
-                    <button className="px-6 py-2 rounded-lg gradient-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity shadow-sm text-center">
-                      Book Appointment
+                    <button
+                      className="px-6 py-2 rounded-lg gradient-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity shadow-sm text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={bookAppointmentMutation.isPending}
+                      onClick={() => handleBookAppointment(provider.name)}
+                    >
+                      {bookingProvider === provider.name && bookAppointmentMutation.isPending
+                        ? "Booking..."
+                        : confirmationNumber
+                        ? `Booked - ${confirmationNumber}`
+                        : "Book Appointment"}
                     </button>
                   </div>
                 </div>
