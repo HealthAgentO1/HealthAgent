@@ -20,14 +20,8 @@ export interface SymptomSession {
   booking_status: string;
   pre_visit_report: any | null;
   created_at: string;
-}
-
-export interface CreateSymptomSessionData {
-  insurance_details: {
-    plan: string;
-    provider: string;
-  };
-  // Add other fields as needed
+  /** Present when booking API returns a confirmation (mock or real). */
+  confirmation_number?: string;
 }
 
 // Example API fetcher using our Axios client
@@ -36,12 +30,6 @@ const fetchProviders = async (zip: string, specialty?: string): Promise<Provider
     params: { zip, specialty },
   });
   return data;
-};
-
-// Create symptom session
-const createSymptomSession = async (data: CreateSymptomSessionData): Promise<SymptomSession> => {
-  const { data: response } = await apiClient.post<SymptomSession>("/symptom-sessions/", data);
-  return response;
 };
 
 // Example React Query hook that developers can adapt for their slices

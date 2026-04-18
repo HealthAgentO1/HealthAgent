@@ -112,6 +112,29 @@ h1, h2, h3, h4, h5, h6 {
   background: linear-gradient(135deg, #00376f 0%, #004e98 100%);
 }
 
+/* ── Shimmer skeleton (LLM loading) ── */
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-container-high) 0%,
+    var(--color-surface-container) 42%,
+    var(--color-surface-container-highest) 50%,
+    var(--color-surface-container) 58%,
+    var(--color-surface-container-high) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.35s ease-in-out infinite;
+}
+
 /* ── Custom Range Slider ── */
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;

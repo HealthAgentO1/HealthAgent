@@ -2,11 +2,14 @@
  * Symptom Check: three-step flow. Steps 2–3 call Django `POST /api/symptom/survey-llm/`
  * via `symptomLlmClient` (JWT on `apiClient`). Hospitals and cost blurbs stay static mocks.
  */
-import React, { useMemo, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import React, { useEffect, useMemo, useState } from "react";
+import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
+  type StructuredFollowUpAnswer,
 } from "../symptomCheck/symptomLlmClient";
 
 type FlowStep = "intake" | "followup" | "results";
@@ -121,9 +124,27 @@ const SymptomCheckPage: React.FC = () => {
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
-  // Serializes Continue / See results while `requestFollowUpQuestions` or `requestConditionAssessment` runs.
-  const [pendingRequest, setPendingRequest] = useState<null | "followup" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
+  /** Fades results content in after the LLM response lands. */
+  const [resultsEntered, setResultsEntered] = useState(false);
+
+  const followUpMutation = useMutation({
+    mutationFn: (vars: { symptoms: string; insuranceLabel: string }) =>
+      requestFollowUpQuestions(vars),
+  });
+
+  const resultsMutation = useMutation({
+    mutationFn: (vars: {
+      symptoms: string;
+      insuranceLabel: string;
+      followUpAnswers: StructuredFollowUpAnswer[];
+    }) => requestConditionAssessment(vars),
+  });
+
+  const followUpLoading = followUpMutation.isPending;
+  const resultsLoading = resultsMutation.isPending;
+  const followUpProgress = useSimulatedProgress(followUpLoading);
+  const resultsProgress = useSimulatedProgress(resultsLoading);
 
   const intakeValid = symptoms.trim().length > 0 && insurance !== "";
 
@@ -136,11 +157,10 @@ const SymptomCheckPage: React.FC = () => {
 
   /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
   const handleContinueToFollowUp = async () => {
-    if (!intakeValid || pendingRequest) return;
+    if (!intakeValid || followUpLoading) return;
     setLlmError(null);
-    setPendingRequest("followup");
     try {
-      const data = await requestFollowUpQuestions({
+      const data = await followUpMutation.mutateAsync({
         symptoms: symptoms.trim(),
         insuranceLabel: insurerLabel,
       });
@@ -150,16 +170,13 @@ const SymptomCheckPage: React.FC = () => {
       setStep("followup");
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to load follow-up questions.");
-    } finally {
-      setPendingRequest(null);
     }
   };
 
   /** Step 2 → 3: second LLM request includes prompts + values for traceability in `user_payload`. */
   const handleSeeResults = async () => {
-    if (!followUpValid || pendingRequest) return;
+    if (!followUpValid || resultsLoading) return;
     setLlmError(null);
-    setPendingRequest("results");
     try {
       const structured = followUpQuestions.map((q) => ({
         question_id: q.id,
@@ -168,7 +185,7 @@ const SymptomCheckPage: React.FC = () => {
         value: followUpAnswers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
       }));
 
-      const payload = await requestConditionAssessment({
+      const payload = await resultsMutation.mutateAsync({
         symptoms: symptoms.trim(),
         insuranceLabel: insurerLabel,
         followUpAnswers: structured,
@@ -177,12 +194,12 @@ const SymptomCheckPage: React.FC = () => {
       setStep("results");
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to load assessment results.");
-    } finally {
-      setPendingRequest(null);
     }
   };
 
   const restart = () => {
+    followUpMutation.reset();
+    resultsMutation.reset();
     setStep("intake");
     setSymptoms("");
     setInsurance("");
@@ -190,8 +207,18 @@ const SymptomCheckPage: React.FC = () => {
     setFollowUpAnswers({});
     setResults(null);
     setLlmError(null);
-    setPendingRequest(null);
+    setResultsEntered(false);
   };
+
+  useEffect(() => {
+    if (!results) {
+      setResultsEntered(false);
+      return;
+    }
+    setResultsEntered(false);
+    const t = window.setTimeout(() => setResultsEntered(true), 40);
+    return () => clearTimeout(t);
+  }, [results]);
 
   const stepIndex = step === "intake" ? 1 : step === "followup" ? 2 : 3;
 
@@ -418,7 +445,11 @@ const SymptomCheckPage: React.FC = () => {
         </header>
 
         {step === "intake" && (
-          <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden">
+          <section
+            className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden transition-opacity duration-300 ease-out ${
+              followUpLoading ? "opacity-60 pointer-events-none" : "opacity-100"
+            }`}
+          >
             <div className="absolute -top-12 -right-12 w-40 h-40 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
             <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
               <span className="material-symbols-outlined text-secondary">edit_note</span>
@@ -490,14 +521,30 @@ const SymptomCheckPage: React.FC = () => {
                 </p>
               ) : null}
 
+              {followUpLoading ? (
+                <div
+                  className="mt-8 pt-6 border-t border-outline-variant/15 space-y-3 transition-opacity duration-300 ease-out"
+                  aria-live="polite"
+                >
+                  <p className="text-sm font-semibold text-primary font-headline">
+                    Generating follow-up questions…
+                  </p>
+                  <LinearLoadingBar
+                    estimatedSeconds={30}
+                    label="Generating follow-up questions"
+                    progress={followUpProgress}
+                  />
+                </div>
+              ) : null}
+
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
                 <button
                   className="gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none"
-                  disabled={!intakeValid || pendingRequest !== null}
+                  disabled={!intakeValid || followUpLoading}
                   type="button"
                   onClick={() => void handleContinueToFollowUp()}
                 >
-                  {pendingRequest === "followup" ? "Preparing questions…" : "Continue"}
+                  {followUpLoading ? "Preparing questions…" : "Continue"}
                   <span className="material-symbols-outlined text-lg">arrow_forward</span>
                 </button>
                 {!intakeValid && (
@@ -512,7 +559,11 @@ const SymptomCheckPage: React.FC = () => {
 
         {step === "followup" && (
           <div className="space-y-6">
-            <div className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3">
+            <div
+              className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
+                resultsLoading ? "opacity-40" : "opacity-100"
+              }`}
+            >
               <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
               <div>
                 <h3 className="text-sm font-bold text-primary mb-1 font-headline">Follow-up questions</h3>
@@ -524,51 +575,79 @@ const SymptomCheckPage: React.FC = () => {
               </div>
             </div>
 
-            <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
-              <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">quiz</span>
-                Short questionnaire
-              </h2>
+            <div className="relative">
+              <section
+                className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
+                  resultsLoading ? "opacity-35 pointer-events-none" : "opacity-100"
+                }`}
+              >
+                <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">quiz</span>
+                  Short questionnaire
+                </h2>
 
-              <div className="space-y-10">
-                {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
-              </div>
+                <div className="space-y-10">
+                  {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
+                </div>
 
-              {llmError ? (
-                <p className="mt-8 text-sm text-error font-body" role="alert">
-                  {llmError}
-                </p>
+                {llmError ? (
+                  <p className="mt-8 text-sm text-error font-body" role="alert">
+                    {llmError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
+                  <button
+                    className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    type="button"
+                    onClick={() => {
+                      setStep("intake");
+                      setFollowUpQuestions([]);
+                      setFollowUpAnswers({});
+                      setLlmError(null);
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
+                    disabled={!followUpValid || resultsLoading}
+                    type="button"
+                    onClick={() => void handleSeeResults()}
+                  >
+                    {resultsLoading ? "Analyzing responses…" : "See results"}
+                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                  </button>
+                </div>
+              </section>
+
+              {resultsLoading ? (
+                <div
+                  className="absolute inset-0 z-10 flex items-start justify-center rounded-xl bg-surface-container-lowest/92 backdrop-blur-[2px] border border-outline-variant/20 p-5 md:p-8 shadow-ambient transition-opacity duration-300 ease-out"
+                  aria-live="polite"
+                >
+                  <div className="w-full max-w-3xl space-y-3">
+                    <p className="text-sm font-semibold text-primary font-headline">
+                      Analyzing your responses…
+                    </p>
+                    <LinearLoadingBar
+                      estimatedSeconds={30}
+                      label="Analyzing your responses"
+                      progress={resultsProgress}
+                    />
+                  </div>
+                </div>
               ) : null}
-
-              <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
-                <button
-                  className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
-                  type="button"
-                  onClick={() => {
-                    setStep("intake");
-                    setFollowUpQuestions([]);
-                    setFollowUpAnswers({});
-                    setLlmError(null);
-                  }}
-                >
-                  Back
-                </button>
-                <button
-                  className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
-                  disabled={!followUpValid || pendingRequest !== null}
-                  type="button"
-                  onClick={() => void handleSeeResults()}
-                >
-                  {pendingRequest === "results" ? "Analyzing responses…" : "See results"}
-                  <span className="material-symbols-outlined text-lg">monitoring</span>
-                </button>
-              </div>
-            </section>
+            </div>
           </div>
         )}
 
         {step === "results" && results && (
-          <div className="space-y-8">
+          <div
+            className={`space-y-8 transition-opacity duration-500 ease-out ${
+              resultsEntered ? "opacity-100" : "opacity-0"
+            }`}
+          >
             <div className="bg-error-container/40 border border-error-container/50 rounded-xl p-5 flex gap-3 items-start">
               <span
                 className="material-symbols-outlined text-on-error-container shrink-0"
