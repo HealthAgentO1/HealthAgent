@@ -21,7 +21,7 @@ Get everyone unblocked before writing any feature code.
 - [ ] Django project + DRF scaffold running locally for all
 - [ ] React/TS app scaffold running locally for all
 - [ ] `.env.example` committed with all required keys listed
-- [ ] API keys distributed — start APImedic + Lexigram signups now (can have delays)
+- [ ] API keys distributed — setup OpenAI/Anthropic keys for Core AI Agent + Lexigram signups
 - [ ] User model + JWT auth
 - [ ] `SymptomSession` and `MedicationProfile` models + migrations
 - [ ] Docker Compose: postgres + django + react
@@ -34,20 +34,21 @@ Get everyone unblocked before writing any feature code.
 All four work this end-to-end: backend services, API endpoints, and frontend UI ship together.
 
 **Backend:**
-- [ ] APImedic `/parse` + `/interview` integration
-- [ ] Triage scoring → urgency level (ER / urgent / routine)
+- [ ] LLM Integration (LangChain / SDK) + System Prompt Engineering for Triage
+- [ ] Context window handling & extraction of urgency level (ER / urgent / routine)
 - [ ] NPPES provider search by ZIP + specialty
-- [ ] Healthcare.gov insurance check (mock if API is slow to access)
+- [ ] Endpoint to validate manual insurance entry
 - [ ] Booking stub endpoint (mock confirmation + reference number)
-- [ ] `/api/symptom/triage/` endpoint returning full shaped response
+- [ ] Chat history endpoint & `/api/symptom/triage/` submission
 
 **Frontend:**
-- [ ] Symptom input form + follow-up question flow
+- [ ] AI Chat Interface (conversational symptom gathering)
+- [ ] Manual Insurance Info capture form
 - [ ] Urgency result display (ER / urgent / routine)
 - [ ] Provider list with specialty + location
 - [ ] Booking confirmation screen
 
-**Done when:** A user can enter symptoms, receive a triage result, see nearby providers, and get a mock booking confirmation — fully working in the browser.
+**Done when:** A user can chat with the AI to describe symptoms, receive a triage result, manually enter insurance, see nearby providers, and get a mock booking confirmation.
 
 ---
 
@@ -111,8 +112,8 @@ Connect the two agents and build the cross-agent flow.
 | Checkpoint | Done when |
 |-----------|-----------|
 | Setup complete | Everyone can run Django + React locally, API keys queued |
-| Feature 1 backend | Triage endpoint returning real APImedic data |
-| Feature 1 done | Full symptom flow works end-to-end in browser |
+| Feature 1 backend | Core AI Chat loop successfully resolving triage context |
+| Feature 1 done | Full conversational flow + insurance entry works end-to-end |
 | Feature 2 backend | Medication endpoint returning real openFDA data |
 | Feature 2 done | Full medication flow works end-to-end in browser |
 | Integration done | Cross-agent pre-visit report generated and displayed |
@@ -124,9 +125,8 @@ Connect the two agents and build the cross-agent flow.
 
 | Risk | Mitigation |
 |------|-----------|
-| APImedic API signup delayed | Prepare mock interview fixture, unblock frontend work |
+| LLM Hallucinations / Latency | Implement strict JSON schema parsing and fallback triage scores |
 | Lexigram onboarding slow | Regex fallback for common drug name extraction |
-| Healthcare.gov API complexity | Mock coverage check with hardcoded response |
-| Feature 1 scope creep | Hard scope: triage + providers + booking stub. Cut provider detail if running over. |
+| Feature 1 scope creep | Hard scope: AI chat + insurance form + providers + booking stub. |
 | Feature 2 scope creep | Hard scope: extraction + interactions + recalls. Cut safer alternatives if running over. |
 | Integration takes longer than expected | Cut Feature 3 polish, ship with basic cross-agent data flow |

@@ -13,14 +13,14 @@ Users experiencing symptoms have no easy way to determine whether they need emer
 ## Goals
 
 - Triage user-reported symptoms to an urgency level (ER / primary care / telehealth)
-- Surface nearby, in-network providers appropriate to that urgency level
-- Confirm insurance coverage before booking
+- Surface nearby providers appropriate to that urgency level (showing all providers regardless of network)
+- Collect user insurance details (displaying an "insurance verification unavailable" warning)
 - Complete or mock-complete an appointment booking
 - Generate a structured pre-visit summary for the receiving provider
 
 ## Non-Goals
 
-- Diagnosing conditions (APImedic handles probabilistic triage; we do not surface diagnoses to users)
+- Diagnosing conditions (The Core AI Agent handles probabilistic triage; we do not surface definitive diagnoses to users)
 - Real-time EHR integration (out of scope for v1)
 - Billing or claims processing
 
@@ -30,10 +30,11 @@ Users experiencing symptoms have no easy way to determine whether they need emer
 
 ```
 User describes symptoms
-    → APImedic: interview + triage score
+    → Core AI Agent: conversational interview + extracts triage score
     → Urgency decision (ER / primary / telehealth)
-    → NPPES: find nearby providers by specialty + location
-    → Healthcare.gov: check plan coverage for provider
+    → User Input: manual entry of insurance plan details
+    → NPPES: find nearby providers by specialty + location (No filtering by network)
+    → UI Display: Show providers with "Insurance verification unavailable - please call to verify" warning
     → Booking: confirm slot (mock or real)
     → Pre-visit report: structured summary for doctor
 ```
@@ -50,23 +51,17 @@ User describes symptoms
 
 ## External APIs
 
-### APImedic
-- Docs: https://apimedic.com/
-- Used for: symptom parsing, follow-up question generation, triage score
-- Key endpoints: `/parse`, `/interview`, `/triage`
-- Auth: App-Id + App-Key headers
-- Rate limits: check plan tier
+### Core AI Agent (LLM Provider)
+- Docs: Setup via LangChain or direct Anthropic/OpenAI SDK.
+- Used for: Conversational symptom parsing, dynamic follow-up questions, and outputting JSON triage scores.
+- Context Limits: Must efficiently parse chat history within the token limits.
+- Auth: API Keys required.
 
 ### NPPES (NPI Registry)
 - Docs: https://npiregistry.cms.hhs.gov/search
 - Used for: provider search by taxonomy code + ZIP
 - Key endpoint: `GET /api/?version=2.1&city=...&taxonomy_description=...`
 - Auth: None (public API)
-
-### Healthcare.gov
-- Docs: https://www.healthcare.gov/developers/
-- Used for: insurance plan lookup, provider network check
-- Auth: API key required
 
 ---
 
@@ -75,11 +70,10 @@ User describes symptoms
 ```python
 class SymptomSession(models.Model):
     user = models.ForeignKey(User)
-    symptoms_raw = models.TextField()
-    apimedic_interview = models.JSONField()
-    triage_level = models.CharField(choices=URGENCY_LEVELS)
+    ai_conversation_log = models.JSONField(default=list)
+    triage_level = models.CharField(choices=URGENCY_LEVELS, null=True, blank=True)
     provider_npi = models.CharField(null=True)
-    insurance_verified = models.BooleanField(default=False)
+    insurance_details = models.JSONField(null=True)
     booking_status = models.CharField(choices=BOOKING_STATES)
     pre_visit_report = models.JSONField(null=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -105,7 +99,8 @@ class SymptomSession(models.Model):
 
 ## Open Questions
 
-- [ ] How do we handle APImedic rate limits under concurrent users?
+- [ ] How do we mitigate LLM hallucinations during symptom triage?
+- [ ] What is the exact System Prompt required to guarantee strict urgency adherence?
 - [ ] Mock booking: what does the UX look like when no real booking API is available?
 - [ ] Do we store the pre-visit report or only generate on-demand?
 - [ ] How do we handle users outside the US (NPPES is US-only)?
