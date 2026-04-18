@@ -1,13 +1,24 @@
 /**
  * Symptom Check: three-step flow. Steps 2–3 call Django `POST /api/symptom/survey-llm/`
  * via `symptomLlmClient` (JWT on `apiClient`). Hospitals and cost blurbs stay static mocks.
+ *
+ * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
+ * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
  */
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
 } from "../symptomCheck/symptomLlmClient";
+import {
+  SYMPTOM_CHECK_SESSION_VERSION,
+  clearSymptomCheckSession,
+  isRecoverableSymptomCheckSession,
+  readSymptomCheckSession,
+  writeSymptomCheckSession,
+  type SymptomCheckSessionSnapshot,
+} from "../symptomCheck/symptomCheckSession";
 
 type FlowStep = "intake" | "followup" | "results";
 
@@ -52,6 +63,13 @@ const MOCK_HOSPITALS = [
 
 function insuranceLabel(id: InsuranceId): string {
   return INSURANCE_OPTIONS.find((o) => o.id === id)?.label ?? id;
+}
+
+/** Ensures persisted insurer ids still match the current option list. */
+function normalizeInsuranceId(id: string): InsuranceId | "" {
+  if (id === "") return "";
+  const found = INSURANCE_OPTIONS.find((o) => o.id === id);
+  return found ? found.id : "";
 }
 
 function buildCostNarrative(
@@ -125,6 +143,17 @@ const SymptomCheckPage: React.FC = () => {
   const [pendingRequest, setPendingRequest] = useState<null | "followup" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
 
+  /**
+   * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
+   * `ready`: normal operation; state syncs to `localStorage`.
+   */
+  const [sessionGate, setSessionGate] = useState<"need-choice" | "ready">(() => {
+    if (typeof window === "undefined") return "ready";
+    const snap = readSymptomCheckSession();
+    if (snap && isRecoverableSymptomCheckSession(snap)) return "need-choice";
+    return "ready";
+  });
+
   const intakeValid = symptoms.trim().length > 0 && insurance !== "";
 
   const followUpValid = followUpAnswersSatisfy(followUpQuestions, followUpAnswers);
@@ -134,15 +163,14 @@ const SymptomCheckPage: React.FC = () => {
     [insurance],
   );
 
-  /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
-  const handleContinueToFollowUp = async () => {
-    if (!intakeValid || pendingRequest) return;
+  /** First LLM call (intake → follow-up questions). Params allow resume without relying on async state. */
+  const runFollowUpRequest = async (input: { symptoms: string; insuranceLabel: string }) => {
     setLlmError(null);
     setPendingRequest("followup");
     try {
       const data = await requestFollowUpQuestions({
-        symptoms: symptoms.trim(),
-        insuranceLabel: insurerLabel,
+        symptoms: input.symptoms,
+        insuranceLabel: input.insuranceLabel,
       });
       setFollowUpQuestions(data.questions);
       setFollowUpAnswers(buildInitialAnswers(data.questions));
@@ -155,22 +183,30 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
-  /** Step 2 → 3: second LLM request includes prompts + values for traceability in `user_payload`. */
-  const handleSeeResults = async () => {
-    if (!followUpValid || pendingRequest) return;
+  /** Second LLM call (follow-up → results). Accepts explicit `questions` / `answers` for resume. */
+  const runResultsRequest = async (input: {
+    symptoms: string;
+    insuranceLabel: string;
+    questions: FollowUpQuestion[];
+    answers: Record<string, FollowUpAnswer>;
+  }) => {
+    if (!followUpAnswersSatisfy(input.questions, input.answers)) {
+      setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      return;
+    }
     setLlmError(null);
     setPendingRequest("results");
     try {
-      const structured = followUpQuestions.map((q) => ({
+      const structured = input.questions.map((q) => ({
         question_id: q.id,
         question_prompt: q.prompt,
         input_type: q.input_type,
-        value: followUpAnswers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
+        value: input.answers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
       }));
 
       const payload = await requestConditionAssessment({
-        symptoms: symptoms.trim(),
-        insuranceLabel: insurerLabel,
+        symptoms: input.symptoms,
+        insuranceLabel: input.insuranceLabel,
         followUpAnswers: structured,
       });
       setResults(payload);
@@ -182,7 +218,110 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
+  /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
+  const handleContinueToFollowUp = async () => {
+    if (!intakeValid || pendingRequest) return;
+    await runFollowUpRequest({
+      symptoms: symptoms.trim(),
+      insuranceLabel: insurerLabel,
+    });
+  };
+
+  /** Step 2 → 3: second LLM request includes prompts + values for traceability in `user_payload`. */
+  const handleSeeResults = async () => {
+    if (!followUpValid || pendingRequest) return;
+    await runResultsRequest({
+      symptoms: symptoms.trim(),
+      insuranceLabel: insurerLabel,
+      questions: followUpQuestions,
+      answers: followUpAnswers,
+    });
+  };
+
+  // Mirror flow state to localStorage whenever the user is past the resume gate.
+  useEffect(() => {
+    if (sessionGate !== "ready") return;
+
+    const snapshot: SymptomCheckSessionSnapshot = {
+      version: SYMPTOM_CHECK_SESSION_VERSION,
+      updatedAt: new Date().toISOString(),
+      step,
+      symptoms,
+      insurance,
+      followUpQuestions,
+      followUpAnswers,
+      results,
+      pendingRequest,
+      llmError,
+    };
+    writeSymptomCheckSession(snapshot);
+  }, [
+    sessionGate,
+    step,
+    symptoms,
+    insurance,
+    followUpQuestions,
+    followUpAnswers,
+    results,
+    pendingRequest,
+    llmError,
+  ]);
+
+  const applySnapshotToState = (snap: SymptomCheckSessionSnapshot) => {
+    setStep(snap.step);
+    setSymptoms(snap.symptoms);
+    setInsurance(normalizeInsuranceId(snap.insurance));
+    setFollowUpQuestions(snap.followUpQuestions);
+    setFollowUpAnswers(snap.followUpAnswers);
+    setResults(snap.results);
+    setLlmError(snap.llmError);
+    setPendingRequest(null);
+  };
+
+  /** Restore saved answers and optionally replay the in-flight LLM call from the saved phase. */
+  const handleResumeSession = () => {
+    const snap = readSymptomCheckSession();
+    if (!snap) {
+      setSessionGate("ready");
+      return;
+    }
+    applySnapshotToState(snap);
+    setSessionGate("ready");
+
+    const ins = normalizeInsuranceId(snap.insurance);
+    const label = ins ? insuranceLabel(ins) : "";
+    const trimmed = snap.symptoms.trim();
+
+    if (snap.pendingRequest === "followup") {
+      if (trimmed.length === 0 || !ins) return;
+      void runFollowUpRequest({ symptoms: trimmed, insuranceLabel: label });
+    } else if (snap.pendingRequest === "results") {
+      if (trimmed.length === 0 || !ins) return;
+      if (snap.followUpQuestions.length === 0) return;
+      void runResultsRequest({
+        symptoms: trimmed,
+        insuranceLabel: label,
+        questions: snap.followUpQuestions,
+        answers: snap.followUpAnswers,
+      });
+    }
+  };
+
+  const handleStartOverFromPrompt = () => {
+    clearSymptomCheckSession();
+    setStep("intake");
+    setSymptoms("");
+    setInsurance("");
+    setFollowUpQuestions([]);
+    setFollowUpAnswers({});
+    setResults(null);
+    setLlmError(null);
+    setPendingRequest(null);
+    setSessionGate("ready");
+  };
+
   const restart = () => {
+    clearSymptomCheckSession();
     setStep("intake");
     setSymptoms("");
     setInsurance("");
@@ -392,7 +531,47 @@ const SymptomCheckPage: React.FC = () => {
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12 pb-16">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-6xl mx-auto relative">
+        {sessionGate === "need-choice" ? (
+          <div
+            aria-labelledby="symptom-session-resume-title"
+            aria-modal="true"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            role="dialog"
+          >
+            <div className="bg-surface-container-lowest rounded-xl shadow-xl max-w-md w-full p-6 md:p-8 border border-outline-variant/20">
+              <h2
+                className="text-xl font-headline font-bold text-primary mb-2"
+                id="symptom-session-resume-title"
+              >
+                Resume your symptom check?
+              </h2>
+              <p className="text-sm text-on-surface-variant font-body leading-relaxed mb-6">
+                We saved your progress in this browser. You can continue where you left off, or start
+                over. If a question step was loading when you left, we will request it again when you
+                resume.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  className="gradient-primary text-on-primary px-6 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 sm:flex-1"
+                  type="button"
+                  onClick={handleResumeSession}
+                >
+                  Resume
+                  <span className="material-symbols-outlined text-lg">play_arrow</span>
+                </button>
+                <button
+                  className="px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
+                  type="button"
+                  onClick={handleStartOverFromPrompt}
+                >
+                  Start over
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <header className="mb-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed text-xs font-semibold uppercase tracking-wider mb-4 border border-secondary-fixed-dim/30">
