@@ -4,8 +4,8 @@
 
 | Person | Role | Owner Slice |
 |--------|------|-------------|
-| Carl (@carlgombert) | Infrastructure / Backend Build | Core Models, Auth, APIs Contract |
-| Zander (@zandermmcg) | Full-Stack Product Eng. | Symptom-to-Care AI Chat |
+| Carl (@carlgombert) | Infrastructure & Backend AI | Core Setup & Backend LLM Triage/API |
+| Zander (@zandermmcg) | Frontend Product Eng. | AI Symptom Chat UI & Session State |
 | Nico (@nico-gb) | Full-Stack Product Eng. | Care Matches & NPPES Search |
 | Peter (@petermckinley) | Full-Stack Product Eng. | Insurance & Appointment Workflows |
 
