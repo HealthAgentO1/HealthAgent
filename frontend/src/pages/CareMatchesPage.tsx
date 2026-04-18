@@ -36,7 +36,7 @@ const CareMatchesPage: React.FC = () => {
     setBookingProvider(providerName);
     bookAppointmentMutation.mutate(sessionId, {
       onSuccess: (data) => {
-        setConfirmationNumber(data.confirmation_number);
+        setConfirmationNumber(data.confirmation_number ?? null);
         setBookingProvider(null);
       },
       onError: (error) => {
