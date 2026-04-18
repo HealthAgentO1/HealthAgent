@@ -1,0 +1,15 @@
+{
+  "semi": true,
+  "singleQuote": true,
+  "trailingComma": "all",
+  "printWidth": 88,
+  "tabWidth": 2,
+  "overrides": [
+    {
+      "files": "*.py",
+      "options": {
+        "parser": "python"
+      }
+    }
+  ]
+}

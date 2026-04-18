@@ -1,0 +1,23 @@
+{
+  "editor.formatOnSave": true,
+  "[javascript]": {
+    "editor.formatOnSave": true
+  },
+  "[typescript]": {
+    "editor.formatOnSave": true
+  },
+  "[html]": {
+    "editor.formatOnSave": true
+  },
+  "[css]": {
+    "editor.formatOnSave": true
+  },
+  "[python]": {
+    "editor.formatOnSave": true
+  },
+  "prettier.requireConfig": true,
+  "prettier.enableDebugLogs": false,
+  "python.formatting.provider": "black",
+  "python.formatting.blackArgs": ["--line-length=88"],
+  "editor.defaultFormatter": "esbenp.prettier-vscode"
+}
