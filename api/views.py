@@ -55,3 +55,70 @@ class SymptomSessionViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(session)
         return Response(serializer.data)
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from django.http import Http404
+import logging
+
+from .services.nppes_service import NPPESService, ProviderDataMapper
+
+logger = logging.getLogger(__name__)
+
+
+class ProvidersView(APIView):
+    """
+    NPPES provider search endpoint.
+    
+    GET /providers/?zip=94107&specialty=Family%20Medicine
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        # Get query parameters
+        zip_code = request.query_params.get('zip')
+        specialty = request.query_params.get('specialty')
+
+        logger.info(f"Providers search request: zip={zip_code}, specialty={specialty}")
+
+        # Validate required parameters
+        if not zip_code:
+            return Response(
+                {'error': 'zip parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Basic ZIP code validation
+        import re
+        if not re.match(r'^\d{5}(-\d{4})?$', zip_code):
+            return Response(
+                {'error': 'Invalid ZIP code format. Use 5 digits or ZIP+4 format.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Search NPPES for providers
+            raw_providers = NPPESService.search_providers(
+                zip_code=zip_code,
+                specialty=specialty,
+                limit=20
+            )
+
+            logger.info(f"Raw providers from NPPES: {len(raw_providers)}")
+
+            # Map and sanitize the data
+            providers = ProviderDataMapper.map_providers(raw_providers)
+
+            logger.info(f"Mapped providers: {len(providers)}")
+
+            return Response(providers)
+
+        except Exception as e:
+            logger.exception(f"Error searching providers: {e}")
+            return Response(
+                {'error': 'Failed to search providers. Please try again.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
