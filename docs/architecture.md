@@ -10,7 +10,7 @@ flowchart TD
     API --> S1["Symptom-to-Care Agent\nTriage → provider → insurance → booking"]
     API --> S2["Medication Safety Agent\nExtract → check interactions → alert"]
 
-    S1 --> A1["Infermedica\nSymptom triage"]
+    S1 --> A1["APImedic\nSymptom triage"]
     S1 --> A2["NPPES\nFind providers"]
     S1 --> A3["Healthcare.gov\nInsurance check"]
 

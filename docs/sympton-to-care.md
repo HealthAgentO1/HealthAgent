@@ -20,7 +20,7 @@ Users experiencing symptoms have no easy way to determine whether they need emer
 
 ## Non-Goals
 
-- Diagnosing conditions (Infermedica handles probabilistic triage; we do not surface diagnoses to users)
+- Diagnosing conditions (APImedic handles probabilistic triage; we do not surface diagnoses to users)
 - Real-time EHR integration (out of scope for v1)
 - Billing or claims processing
 
@@ -30,7 +30,7 @@ Users experiencing symptoms have no easy way to determine whether they need emer
 
 ```
 User describes symptoms
-    → Infermedica: interview + triage score
+    → APImedic: interview + triage score
     → Urgency decision (ER / primary / telehealth)
     → NPPES: find nearby providers by specialty + location
     → Healthcare.gov: check plan coverage for provider
@@ -50,8 +50,8 @@ User describes symptoms
 
 ## External APIs
 
-### Infermedica
-- Docs: https://developer.infermedica.com/documentation/overview/
+### APImedic
+- Docs: https://apimedic.com/
 - Used for: symptom parsing, follow-up question generation, triage score
 - Key endpoints: `/parse`, `/interview`, `/triage`
 - Auth: App-Id + App-Key headers
@@ -76,7 +76,7 @@ User describes symptoms
 class SymptomSession(models.Model):
     user = models.ForeignKey(User)
     symptoms_raw = models.TextField()
-    infermedica_interview = models.JSONField()
+    apimedic_interview = models.JSONField()
     triage_level = models.CharField(choices=URGENCY_LEVELS)
     provider_npi = models.CharField(null=True)
     insurance_verified = models.BooleanField(default=False)
@@ -105,7 +105,7 @@ class SymptomSession(models.Model):
 
 ## Open Questions
 
-- [ ] How do we handle Infermedica rate limits under concurrent users?
+- [ ] How do we handle APImedic rate limits under concurrent users?
 - [ ] Mock booking: what does the UX look like when no real booking API is available?
 - [ ] Do we store the pre-visit report or only generate on-demand?
 - [ ] How do we handle users outside the US (NPPES is US-only)?

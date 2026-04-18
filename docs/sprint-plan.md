@@ -21,7 +21,7 @@ Get everyone unblocked before writing any feature code.
 - [ ] Django project + DRF scaffold running locally for all
 - [ ] React/TS app scaffold running locally for all
 - [ ] `.env.example` committed with all required keys listed
-- [ ] API keys distributed — start Infermedica + Lexigram signups now (can have delays)
+- [ ] API keys distributed — start APImedic + Lexigram signups now (can have delays)
 - [ ] User model + JWT auth
 - [ ] `SymptomSession` and `MedicationProfile` models + migrations
 - [ ] Docker Compose: postgres + django + react
@@ -34,7 +34,7 @@ Get everyone unblocked before writing any feature code.
 All four work this end-to-end: backend services, API endpoints, and frontend UI ship together.
 
 **Backend:**
-- [ ] Infermedica `/parse` + `/interview` integration
+- [ ] APImedic `/parse` + `/interview` integration
 - [ ] Triage scoring → urgency level (ER / urgent / routine)
 - [ ] NPPES provider search by ZIP + specialty
 - [ ] Healthcare.gov insurance check (mock if API is slow to access)
@@ -111,7 +111,7 @@ Connect the two agents and build the cross-agent flow.
 | Checkpoint | Done when |
 |-----------|-----------|
 | Setup complete | Everyone can run Django + React locally, API keys queued |
-| Feature 1 backend | Triage endpoint returning real Infermedica data |
+| Feature 1 backend | Triage endpoint returning real APImedic data |
 | Feature 1 done | Full symptom flow works end-to-end in browser |
 | Feature 2 backend | Medication endpoint returning real openFDA data |
 | Feature 2 done | Full medication flow works end-to-end in browser |
@@ -124,7 +124,7 @@ Connect the two agents and build the cross-agent flow.
 
 | Risk | Mitigation |
 |------|-----------|
-| Infermedica API signup delayed | Prepare mock interview fixture, unblock frontend work |
+| APImedic API signup delayed | Prepare mock interview fixture, unblock frontend work |
 | Lexigram onboarding slow | Regex fallback for common drug name extraction |
 | Healthcare.gov API complexity | Mock coverage check with hardcoded response |
 | Feature 1 scope creep | Hard scope: triage + providers + booking stub. Cut provider detail if running over. |
