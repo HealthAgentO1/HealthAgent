@@ -26,17 +26,29 @@ const providers = [
 
 const CareMatchesPage: React.FC = () => {
   const [bookingProvider, setBookingProvider] = useState<string | null>(null);
-  const [confirmationNumber, setConfirmationNumber] = useState<string | null>(null);
+  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [bookingDetails, setBookingDetails] = useState<{
+    providerName: string;
+    specialty: string;
+    confirmationNumber: string;
+    nextAvail: string;
+  } | null>(null);
   const bookAppointmentMutation = useBookAppointment();
 
   // Mock session ID - in real app this would come from routing or context
   const sessionId = 1; // TODO: Get from actual session
 
-  const handleBookAppointment = (providerName: string) => {
-    setBookingProvider(providerName);
+  const handleBookAppointment = (provider: (typeof providers)[0]) => {
+    setBookingProvider(provider.name);
     bookAppointmentMutation.mutate(sessionId, {
       onSuccess: (data) => {
-        setConfirmationNumber(data.confirmation_number);
+        setBookingDetails({
+          providerName: provider.name,
+          specialty: provider.specialty,
+          confirmationNumber: data.confirmation_number,
+          nextAvail: provider.nextAvail,
+        });
+        setShowConfirmation(true);
         setBookingProvider(null);
       },
       onError: (error) => {
@@ -236,8 +248,7 @@ const CareMatchesPage: React.FC = () => {
                     >
                       {bookingProvider === provider.name && bookAppointmentMutation.isPending
                         ? "Booking..."
-                        : confirmationNumber
-                        ? `Booked - ${confirmationNumber}`
+
                         : "Book Appointment"}
                     </button>
                   </div>
@@ -267,6 +278,76 @@ const CareMatchesPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Booking Confirmation Modal */}
+      {showConfirmation && bookingDetails && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-surface rounded-2xl max-w-md w-full shadow-2xl border border-outline-variant/20">
+            <div className="p-6">
+              <div className="flex items-center justify-center mb-4">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center">
+                  <span className="material-symbols-outlined text-primary text-3xl">
+                    check_circle
+                  </span>
+                </div>
+              </div>
+
+              <h2 className="text-xl font-headline font-bold text-primary text-center mb-2">
+                Appointment Booked!
+              </h2>
+
+              <p className="text-on-surface-variant text-center text-sm mb-6">
+                Your appointment has been successfully scheduled
+              </p>
+
+              <div className="bg-surface-container-low rounded-xl p-4 mb-6">
+                <div className="space-y-3">
+                  <div className="flex justify-between items-start">
+                    <span className="text-sm font-medium text-on-surface">Provider</span>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-on-surface">
+                        {bookingDetails.providerName}
+                      </div>
+                      <div className="text-xs text-on-surface-variant">
+                        {bookingDetails.specialty}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-on-surface">Next Available</span>
+                    <span className="text-sm text-on-surface">
+                      {bookingDetails.nextAvail}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-on-surface">Confirmation #</span>
+                    <span className="text-sm font-mono font-semibold text-primary">
+                      {bookingDetails.confirmationNumber}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  className="flex-1 px-4 py-3 rounded-lg border border-outline-variant/30 text-on-surface font-semibold text-sm hover:bg-surface-container transition-colors"
+                  onClick={() => setShowConfirmation(false)}
+                >
+                  Close
+                </button>
+                <button
+                  className="flex-1 px-4 py-3 rounded-lg gradient-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity"
+                  onClick={() => setShowConfirmation(false)}
+                >
+                  View Details
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
