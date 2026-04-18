@@ -1,0 +1,169 @@
+import logging
+
+from django.conf import settings as django_settings
+from django.shortcuts import get_object_or_404
+from django.utils import timezone
+from rest_framework import serializers, status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from .models import SymptomSession
+from .services.symptom_llm import (
+    complete_symptom_survey_turn,
+    conversation_log_to_chat_messages,
+    get_symptom_chat_system_prompt,
+    run_symptom_turn,
+    trim_chat_messages,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class SymptomChatRequestSerializer(serializers.Serializer):
+    session_id = serializers.UUIDField(required=False, allow_null=True)
+    message = serializers.CharField(min_length=1, max_length=20000)
+
+
+class SymptomSurveyLlmSerializer(serializers.Serializer):
+    """
+    Structured Symptom Check (not chat): SPA sends the same system text it bundles from
+    `frontend/src/symptomCheck/prompts/*.txt` plus JSON user_payload for the model.
+    """
+
+    phase = serializers.ChoiceField(choices=["followup_questions", "condition_assessment"])
+    system_prompt = serializers.CharField(min_length=1, max_length=200_000)
+    user_payload = serializers.JSONField()
+
+
+def _iso_z(dt):
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+class SymptomChatView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        req_ser = SymptomChatRequestSerializer(data=request.data)
+        req_ser.is_valid(raise_exception=True)
+        session_id = req_ser.validated_data.get("session_id")
+        message = req_ser.validated_data["message"].strip()
+
+        if session_id:
+            session = get_object_or_404(
+                SymptomSession,
+                public_id=session_id,
+                user=request.user,
+            )
+        else:
+            session = SymptomSession.objects.create(user=request.user)
+
+        now = timezone.now()
+        user_entry = {
+            "role": "user",
+            "content": message,
+            "timestamp": now.isoformat(),
+        }
+        log = list(session.ai_conversation_log) + [user_entry]
+
+        chat_messages = conversation_log_to_chat_messages(log)
+        system_prompt = get_symptom_chat_system_prompt()
+        trimmed = trim_chat_messages(
+            system_prompt,
+            chat_messages,
+            django_settings.LLM_MAX_INPUT_TOKENS,
+        )
+
+        try:
+            parsed = run_symptom_turn(system_prompt, trimmed)
+        except RuntimeError as e:
+            logger.warning("LLM configuration error: %s", e)
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except ValueError as e:
+            logger.exception("LLM returned invalid JSON: %s", e)
+            return Response(
+                {"detail": "The model returned an invalid response. Please try again."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        except Exception as e:
+            logger.exception("LLM request failed: %s", e)
+            return Response(
+                {"detail": "Upstream language model error."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        assistant_now = timezone.now()
+        assistant_entry = {
+            "role": "assistant",
+            "content": parsed["assistant_message"],
+            "timestamp": assistant_now.isoformat(),
+            "triage_level": parsed["triage_level"],
+            "reasoning": parsed["reasoning"],
+            "interview_complete": parsed["interview_complete"],
+        }
+        session.ai_conversation_log = log + [assistant_entry]
+        session.triage_level = parsed["triage_level"]
+        session.save(
+            update_fields=[
+                "ai_conversation_log",
+                "triage_level",
+                "updated_at",
+            ]
+        )
+
+        turn_index = sum(
+            1 for e in session.ai_conversation_log if e.get("role") == "assistant"
+        )
+
+        return Response(
+            {
+                "session_id": str(session.public_id),
+                "assistant_message": parsed["assistant_message"],
+                "triage_level": parsed["triage_level"],
+                "reasoning": parsed["reasoning"],
+                "interview_complete": parsed["interview_complete"],
+                "turn_index": turn_index,
+                "created_at": _iso_z(session.created_at),
+                "updated_at": _iso_z(session.updated_at),
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+class SymptomSurveyLlmView(APIView):
+    """
+    POST JSON-only survey turns for `/symptom-check`: follow-up question generation or
+    condition assessment. Credentials stay server-side; the client only supplies prompts
+    it already ships in the bundle (not user-authored system instructions in production
+    unless you replace the SPA — validate on the gateway if that becomes a concern).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        ser = SymptomSurveyLlmSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        system_prompt = ser.validated_data["system_prompt"].strip()
+        user_payload = ser.validated_data["user_payload"]
+        if not isinstance(user_payload, dict):
+            return Response(
+                {"detail": "user_payload must be a JSON object."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            raw_text = complete_symptom_survey_turn(system_prompt, user_payload)
+        except RuntimeError as e:
+            logger.warning("LLM configuration error (survey): %s", e)
+            return Response({"detail": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        except Exception as e:
+            logger.exception("LLM request failed (survey): %s", e)
+            return Response(
+                {"detail": "Upstream language model error."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response({"raw_text": raw_text, "phase": ser.validated_data["phase"]})

@@ -21,12 +21,13 @@ class SymptomSessionViewSet(viewsets.ModelViewSet):
     ViewSet for managing symptom sessions.
     Users can only access their own sessions.
     """
+    queryset = SymptomSession.objects.all()
     serializer_class = SymptomSessionSerializer
     # permission_classes = [IsAuthenticated]  # Temporarily disabled for testing
 
     def get_queryset(self):
-        # return SymptomSession.objects.filter(user=self.request.user)
-        return SymptomSession.objects.all()  # Temporarily allow all for testing
+        # return self.queryset.filter(user=self.request.user)
+        return self.queryset  # Temporarily allow all for testing
 
     def perform_create(self, serializer):
         # serializer.save(user=self.request.user)
