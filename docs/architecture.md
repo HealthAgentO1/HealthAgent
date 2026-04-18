@@ -2,7 +2,7 @@
 
 ```mermaid
 flowchart TD
-    FE["React / TypeScript frontend\nSymptom input, medication input, reports\n(Powered by TanStack React Query & Axios)"]
+    FE["React / TypeScript frontend\nSurvey-style symptom check, medication input, reports"]
     API["Django REST API\nAuth, orchestration, session state, DB"]
 
     FE --> API
