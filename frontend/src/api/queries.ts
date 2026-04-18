@@ -53,9 +53,15 @@ export const useProviders = (zip: string, specialty?: string) => {
   });
 };
 
-// Hook for creating symptom sessions
-export const useCreateSymptomSession = () => {
+// Book appointment for a symptom session
+const bookAppointment = async (sessionId: number): Promise<SymptomSession> => {
+  const { data } = await apiClient.post<SymptomSession>(`/symptom-sessions/${sessionId}/book/`);
+  return data;
+};
+
+// Hook for booking appointments
+export const useBookAppointment = () => {
   return useMutation({
-    mutationFn: createSymptomSession,
+    mutationFn: bookAppointment,
   });
 };
