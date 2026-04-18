@@ -24,9 +24,51 @@ const providers = [
   },
 ];
 
+type TriageLevel = 'emergency' | 'urgent' | 'routine';
+
+interface UrgencyBannerConfig {
+  icon: string;
+  title: string;
+  description: string;
+  bgColor: string;
+  borderColor: string;
+  iconColor: string;
+}
+
+const getUrgencyBannerConfig = (level: TriageLevel): UrgencyBannerConfig => {
+  const configs: Record<TriageLevel, UrgencyBannerConfig> = {
+    emergency: {
+      icon: 'emergency',
+      title: 'EMERGENCY - Seek Immediate Care',
+      description: 'Your symptoms require immediate medical evaluation. Call 911 or go to the nearest emergency room right now.',
+      bgColor: 'bg-error/10',
+      borderColor: 'border-error',
+      iconColor: 'text-error',
+    },
+    urgent: {
+      icon: 'priority_high',
+      title: 'URGENT Care Needed',
+      description: 'Your symptoms require prompt medical attention within the next few hours. Please contact a healthcare provider or visit an urgent care facility.',
+      bgColor: 'bg-warning/10',
+      borderColor: 'border-warning',
+      iconColor: 'text-warning',
+    },
+    routine: {
+      icon: 'check_circle',
+      title: 'Routine Care Recommended',
+      description: 'Your symptoms can be addressed through routine care. Schedule an appointment with your primary care provider or a specialist.',
+      bgColor: 'bg-secondary/10',
+      borderColor: 'border-secondary',
+      iconColor: 'text-secondary',
+    },
+  };
+  return configs[level];
+};
+
 const CareMatchesPage: React.FC = () => {
   const [bookingProvider, setBookingProvider] = useState<string | null>(null);
   const [showConfirmation, setShowConfirmation] = useState(false);
+  const [triageLevel, setTriageLevel] = useState<TriageLevel>('routine');
   const [bookingDetails, setBookingDetails] = useState<{
     providerName: string;
     specialty: string;
@@ -37,6 +79,8 @@ const CareMatchesPage: React.FC = () => {
 
   // Mock session ID - in real app this would come from routing or context
   const sessionId = 1; // TODO: Get from actual session
+  
+  const urgencyConfig = getUrgencyBannerConfig(triageLevel);
 
   const handleBookAppointment = (provider: (typeof providers)[0]) => {
     setBookingProvider(provider.name);
@@ -60,6 +104,26 @@ const CareMatchesPage: React.FC = () => {
   };
   return (
     <div className="p-6 md:p-12 max-w-7xl mx-auto w-full">
+      {/* Urgency Banner */}
+      <div className={`${urgencyConfig.bgColor} rounded-2xl border-2 ${urgencyConfig.borderColor} p-6 mb-10 relative overflow-hidden`}>
+        <div className="absolute -top-12 -right-12 w-40 h-40 bg-current/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="flex items-start gap-4 relative z-10">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${urgencyConfig.bgColor}`}>
+            <span className={`material-symbols-outlined text-2xl ${urgencyConfig.iconColor}`}>
+              {urgencyConfig.icon}
+            </span>
+          </div>
+          <div className="flex-1">
+            <h2 className={`text-lg md:text-xl font-headline font-bold ${urgencyConfig.iconColor} mb-2`}>
+              {urgencyConfig.title}
+            </h2>
+            <p className="text-on-surface-variant text-sm leading-relaxed">
+              {urgencyConfig.description}
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Header */}
       <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div>
@@ -67,14 +131,14 @@ const CareMatchesPage: React.FC = () => {
             <span className="material-symbols-outlined text-sm">
               calendar_clock
             </span>
-            Routine Care Recommended
+            Care Recommendations
           </div>
           <h1 className="text-4xl md:text-5xl font-headline font-bold text-primary tracking-tight mb-2">
-            Care Recommendations
+            Recommended Providers
           </h1>
           <p className="text-on-surface-variant font-body text-base max-w-2xl">
-            Based on your recent symptom check, we have identified specialized
-            providers to assist with your ongoing wellness journey.
+            Based on your triage results, we have identified specialized
+            providers to assist with your healthcare needs.
           </p>
         </div>
       </header>
