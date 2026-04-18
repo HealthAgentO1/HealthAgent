@@ -2,14 +2,14 @@
 
 ## Team
 
-| Person | Role |
-|--------|------|
-| Dev 1 | Backend engineering |
-| Dev 2 | Backend engineering |
-| Dev 3 | Frontend engineering |
-| Dev 4 | Full-stack engineering |
+| Person | Role | Owner Slice |
+|--------|------|-------------|
+| Carl (@carlgombert) | Infrastructure / Backend Build | Core Models, Auth, APIs Contract |
+| Zander (@zandermmcg) | Full-Stack Product Eng. | Symptom-to-Care AI Chat |
+| Nico (@nico-gb) | Full-Stack Product Eng. | Care Matches & NPPES Search |
+| Peter (@petermckinley) | Full-Stack Product Eng. | Insurance & Appointment Workflows |
 
-All four developers work together on each feature in sequence before moving to the next.
+Rather than blocking on strictly sequential phases, developers own end-to-end "Vertical Slices" and use the API Contract to mock dependencies while running in parallel.
 
 ---
 
@@ -17,15 +17,11 @@ All four developers work together on each feature in sequence before moving to t
 
 Get everyone unblocked before writing any feature code.
 
-- [ ] Repo created, single `main` branch + `feat/` branches per phase
-- [ ] Django project + DRF scaffold running locally for all
-- [ ] React/TS app scaffold running locally for all
-- [ ] `.env.example` committed with all required keys listed
-- [ ] API keys distributed — setup OpenAI/Anthropic keys for Core AI Agent + Lexigram signups
-- [ ] User model + JWT auth
-- [ ] `SymptomSession` and `MedicationProfile` models + migrations
-- [ ] Docker Compose: postgres + django + react
-- [ ] Agree on API contract shape for Feature 1 before writing any code
+- [x] Repo created, single `main` branch + `feat/` branches per phase
+- [x] Django project + DRF scaffold running locally for all
+- [x] React/TS app scaffold running locally for all
+- [x] Frontend API connection layer (TanStack React Query + Axios) configured
+- [x] `.env.example` committed with all required keys listed
 
 ---
 
