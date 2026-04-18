@@ -1,13 +1,15 @@
 # API contract — Feature 1 (Symptom-to-Care)
 
 **Status:** Draft (pre-implementation)  
-**Version:** 1.0  
+**Version:** 1.0.1  
 **Base URL (dev):** `http://127.0.0.1:8000/api`  
 **Primary consumer:** React frontend (`VITE_API_URL` + Axios)
 
 This document defines the HTTP contract for the symptom interview, triage submission, and NPPES-backed provider search. Backend implementations MUST preserve these paths, HTTP methods, and JSON field names unless the team agrees on a versioned revision.
 
 **Related:** Domain behavior and data model context live in [sympton-to-care.md](./sympton-to-care.md).
+
+**Symptom Check survey LLM (as implemented today):** The three-step `/symptom-check` UI issues two structured “LLM” calls from the **browser** via `frontend/src/symptomCheck/symptomLlmClient.ts`, using prompt templates under `frontend/src/symptomCheck/prompts/`. By default responses are **mocked**; an optional `VITE_SYMPTOM_LLM_URL` can receive the same JSON payload. That path is **separate** from the draft HTTP resources below (`POST /symptom/chat/`, `POST /symptom/triage/`), which describe a future Django-backed chat and triage contract. When the backend owns the LLM, either align these contracts or version the API.
 
 ---
 
@@ -241,3 +243,4 @@ All developers MUST review this contract before Feature 1 implementation. Record
 | Version | Date | Summary |
 |---------|------|---------|
 | 1.0 | 2026-04-18 | Initial contract for chat, triage, and providers endpoints |
+| 1.0.1 | 2026-04-18 | Documented parallel frontend Symptom Check LLM payload (`VITE_SYMPTOM_LLM_URL`, prompt files); clarifies relation to draft `/symptom/chat/` and `/symptom/triage/` |
