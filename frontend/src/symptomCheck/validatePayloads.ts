@@ -2,7 +2,7 @@
  * Validate and parse LLM JSON responses
  */
 
-import {
+import type {
   InitialAssessment,
   FollowupQuestionResponse,
   FinalAssessment,

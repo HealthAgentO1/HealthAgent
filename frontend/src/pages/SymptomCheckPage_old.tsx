@@ -4,9 +4,9 @@ import {
   startSymptomCheck,
   getFollowupQuestions,
   finalizeAssessment,
-  FollowupQuestion,
-  FinalAssessment,
-  InitialAssessment,
+  type FollowupQuestion,
+  type FinalAssessment,
+  type InitialAssessment,
 } from "../symptomCheck/symptomLlmClient";
 import {
   validateInitialAssessment,
