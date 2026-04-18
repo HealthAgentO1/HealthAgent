@@ -170,6 +170,26 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
-# Core AI Agent (Deepseek); optional until symptom/LLM code calls the provider.
+# Core AI Agent — OpenAI-compatible (OpenAI, Deepseek, etc.) or Anthropic.
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_API_BASE = os.environ.get("DEEPSEEK_API_BASE", "https://api.deepseek.com")
+
+# Prefer OPENAI_*; fall back to Deepseek env for local dev with a single key.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "") or DEEPSEEK_API_KEY
+_openai_base = os.environ.get("OPENAI_BASE_URL", "").strip()
+if _openai_base:
+    OPENAI_BASE_URL = _openai_base
+elif os.environ.get("OPENAI_API_KEY"):
+    OPENAI_BASE_URL = "https://api.openai.com/v1"
+else:
+    OPENAI_BASE_URL = DEEPSEEK_API_BASE
+LLM_MODEL = os.environ.get("LLM_MODEL", "deepseek-chat")
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-3-5-sonnet-20241022")
+
+# openai | anthropic — which HTTP API to call for symptom chat.
+LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").strip().lower()
+
+# Budget for user+assistant turns sent to the model (tiktoken estimate); system prompt added on top.
+LLM_MAX_INPUT_TOKENS = int(os.environ.get("LLM_MAX_INPUT_TOKENS", "12000"))
