@@ -26,6 +26,8 @@ class User(AbstractUser):
     username = None
     email = models.EmailField("email address", unique=True)
     date_of_birth = models.DateField(null=True, blank=True)
+    # Symptom Check / settings: optional US practice address (same shape as client `UserAddress`).
+    default_address = models.JSONField(null=True, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

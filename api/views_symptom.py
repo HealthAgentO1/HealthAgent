@@ -26,6 +26,7 @@ from .services.symptom_llm import (
     run_symptom_turn,
     trim_chat_messages,
 )
+from users.us_states import US_STATE_CODES
 
 logger = logging.getLogger(__name__)
 
@@ -41,63 +42,6 @@ INSURER_SLUGS = frozenset(
         "bluecross",
         "aetna",
         "other",
-    }
-)
-
-# US postal state abbreviations (50 states + DC) — used to validate intake addresses.
-US_STATE_CODES = frozenset(
-    {
-        "AL",
-        "AK",
-        "AZ",
-        "AR",
-        "CA",
-        "CO",
-        "CT",
-        "DE",
-        "DC",
-        "FL",
-        "GA",
-        "HI",
-        "ID",
-        "IL",
-        "IN",
-        "IA",
-        "KS",
-        "KY",
-        "LA",
-        "ME",
-        "MD",
-        "MA",
-        "MI",
-        "MN",
-        "MS",
-        "MO",
-        "MT",
-        "NE",
-        "NV",
-        "NH",
-        "NJ",
-        "NM",
-        "NY",
-        "NC",
-        "ND",
-        "OH",
-        "OK",
-        "OR",
-        "PA",
-        "RI",
-        "SC",
-        "SD",
-        "TN",
-        "TX",
-        "UT",
-        "VT",
-        "VA",
-        "WA",
-        "WV",
-        "WI",
-        "WY",
     }
 )
 

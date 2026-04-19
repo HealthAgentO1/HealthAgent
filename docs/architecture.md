@@ -66,6 +66,8 @@ The **`/symptom-check`** React page mirrors survey state to **`localStorage`** u
 
 - **Scope:** Persistence is **browser-local only** (not synced across devices or accounts). Clearing site data or using another browser profile starts fresh.
 
+- **Default address (account):** On **Settings & profile** (`/settings`), users can save a **validated US address** to the account via **`PATCH /api/auth/me/`** (`default_address` JSON or `null` to clear). It uses the same field rules as step 1 (`frontend/src/symptomCheck/addressValidation.ts` and `users/serializers.py` `DefaultAddressSerializer`). When the Symptom Check intake step loads with **no address** in local state, the SPA calls **`GET /api/auth/me/`** and prefills from `default_address` when present, shows a short notice, and offers **Clear address** to blank fields without immediately re-applying the saved default in that visit.
+
 ## Medication Safety UI and extraction API
 
 The **Medication Safety** area (`/medication-safety`) lets signed-in users build an **active regimen** from free text. The flow is implemented in React (`frontend/src/pages/MedicationSafetyPage.tsx`, add-prescription UI in `frontend/src/medicationSafety/AddPrescriptionModal.tsx`) and uses the same **`apiClient`** + JWT pattern as the rest of the app.

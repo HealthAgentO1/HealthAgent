@@ -1,8 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { isAxiosError } from "axios";
-import { fetchUserProfile, updateUserProfile } from "../api/profile";
+import {
+  defaultAddressToUserAddress,
+  fetchUserProfile,
+  updateUserProfile,
+  userAddressToDefaultPayload,
+} from "../api/profile";
 import { useAuth } from "../context/AuthContext";
+import { validateUserAddress, type UserAddress } from "../symptomCheck/addressValidation";
+import {
+  INITIAL_ADDRESS_BLURRED,
+  UserAddressFormFields,
+  type AddressFieldKey,
+} from "../symptomCheck/UserAddressFormFields";
 
 function displayInitial(first: string, last: string, email: string | null): string {
   const f = first.trim();
@@ -25,6 +36,20 @@ const SettingsProfilePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  const [defaultAddrUser, setDefaultAddrUser] = useState<UserAddress>({
+    street: "",
+    city: "",
+    state: "",
+    postalCode: "",
+  });
+  const [defaultAddrBlurred, setDefaultAddrBlurred] =
+    useState<Record<AddressFieldKey, boolean>>(INITIAL_ADDRESS_BLURRED);
+  const [addressSaveError, setAddressSaveError] = useState<string | null>(null);
+  const [addressSavedHint, setAddressSavedHint] = useState(false);
+  const [addressSaving, setAddressSaving] = useState(false);
+
+  const defaultAddrValidation = useMemo(() => validateUserAddress(defaultAddrUser), [defaultAddrUser]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
@@ -33,6 +58,8 @@ const SettingsProfilePage: React.FC = () => {
       setFirstName(p.first_name ?? "");
       setLastName(p.last_name ?? "");
       setBirthdate(p.date_of_birth ?? "");
+      setDefaultAddrUser(defaultAddressToUserAddress(p.default_address));
+      setDefaultAddrBlurred(INITIAL_ADDRESS_BLURRED);
     } catch (e) {
       if (isAxiosError(e) && e.response?.status === 401) {
         setLoadError("Session expired. Sign in again.");
@@ -87,6 +114,53 @@ const SettingsProfilePage: React.FC = () => {
       }
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveDefaultAddress = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddressSaveError(null);
+    setAddressSavedHint(false);
+    setAddressSaving(true);
+    const empty =
+      !defaultAddrUser.street.trim() &&
+      !defaultAddrUser.city.trim() &&
+      !defaultAddrUser.state &&
+      !defaultAddrUser.postalCode.trim();
+    try {
+      if (empty) {
+        await updateUserProfile({ default_address: null });
+      } else {
+        const v = validateUserAddress(defaultAddrUser);
+        if (!v.valid) {
+          setDefaultAddrBlurred({
+            street: true,
+            city: true,
+            state: true,
+            postalCode: true,
+          });
+          setAddressSaveError("Fix the address fields before saving.");
+          return;
+        }
+        await updateUserProfile({
+          default_address: userAddressToDefaultPayload(defaultAddrUser),
+        });
+      }
+      setAddressSavedHint(true);
+      window.setTimeout(() => setAddressSavedHint(false), 4000);
+    } catch (err) {
+      if (isAxiosError(err) && err.response?.data) {
+        const d = err.response.data as Record<string, unknown>;
+        if (typeof d.detail === "string") {
+          setAddressSaveError(d.detail);
+        } else {
+          setAddressSaveError("Could not save address. Check your input and try again.");
+        }
+      } else {
+        setAddressSaveError("Network error. Is the API running?");
+      }
+    } finally {
+      setAddressSaving(false);
     }
   };
 
@@ -233,6 +307,66 @@ const SettingsProfilePage: React.FC = () => {
         </section>
 
         <section
+          className="rounded-xl border border-ghost bg-surface-container-lowest p-5 shadow-ambient md:p-6"
+          aria-labelledby="default-address-heading"
+        >
+          <h2
+            className="mb-2 flex items-center gap-2 font-headline text-lg font-bold text-primary md:text-xl"
+            id="default-address-heading"
+          >
+            <span className="material-symbols-outlined text-secondary text-[22px]">location_on</span>
+            Default address
+          </h2>
+          <p className="max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
+            Optional. Stored on your account (not just this browser session). When set, Symptom Check step 1 can
+            prefill these fields if you have not already entered an address there.
+          </p>
+
+          {!loading && !loadError ? (
+            <form
+              className="mt-4 border-t border-outline-variant/15 pt-4"
+              id="settings-default-address-form"
+              onSubmit={(e) => void handleSaveDefaultAddress(e)}
+            >
+              <UserAddressFormFields
+                addressFieldBlurred={defaultAddrBlurred}
+                errors={defaultAddrValidation.errors}
+                idPrefix="settings-default"
+                legend="US mailing or practice address"
+                description="Same validation as Symptom Check — street, city, state, and 5-digit ZIP. Save with all fields empty to remove your saved default."
+                setAddressFieldBlurred={setDefaultAddrBlurred}
+                setUserAddress={setDefaultAddrUser}
+                showRequiredMarkers={false}
+                userAddress={defaultAddrUser}
+              />
+              <div className="mt-6 space-y-3">
+                {addressSaveError ? (
+                  <p className="text-sm text-error font-body" role="alert">
+                    {addressSaveError}
+                  </p>
+                ) : null}
+                {addressSavedHint ? (
+                  <p className="font-body text-sm font-medium text-secondary" role="status">
+                    Address saved.
+                  </p>
+                ) : null}
+                <button
+                  className="gradient-primary cursor-pointer rounded-lg px-5 py-2 font-headline text-sm font-semibold text-on-primary shadow-ambient transition-all hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] disabled:opacity-50"
+                  disabled={addressSaving}
+                  type="submit"
+                >
+                  {addressSaving ? "Saving…" : "Save default address"}
+                </button>
+              </div>
+            </form>
+          ) : loading ? (
+            <p className="mt-4 border-t border-outline-variant/15 pt-4 text-sm text-on-surface-variant font-body">
+              Loading…
+            </p>
+          ) : null}
+        </section>
+
+        <section
           className="rounded-xl border border-ghost bg-surface-container-lowest p-6 shadow-ambient md:p-8"
           aria-labelledby="settings-heading"
         >
@@ -244,6 +378,10 @@ const SettingsProfilePage: React.FC = () => {
             App &amp; data
           </h2>
           <ul className="list-disc space-y-3 pl-5 font-body text-sm leading-relaxed text-on-surface-variant">
+            <li>
+              <strong className="text-on-surface">Default address</strong> (above) is stored on your
+              account and can prefill Symptom Check when you have not entered an address there yet.
+            </li>
             <li>
               <strong className="text-on-surface">Symptom Check</strong> can save progress in this
               browser so you can resume. Clear site data in your browser if you need to remove it.

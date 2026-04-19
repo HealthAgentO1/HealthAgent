@@ -29,6 +29,7 @@ class AuthApiTests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_200_OK)
         self.assertEqual(res.data["email"], "me@example.com")
         self.assertEqual(res.data["first_name"], "Pat")
+        self.assertIsNone(res.data.get("default_address"))
         patch = self.client.patch(
             self.me_url,
             {"first_name": "Pat", "last_name": "Lee", "date_of_birth": "1990-05-15"},
@@ -39,6 +40,38 @@ class AuthApiTests(APITestCase):
         self.assertEqual(patch.data["date_of_birth"], "1990-05-15")
         u.refresh_from_db()
         self.assertEqual(u.last_name, "Lee")
+
+    def test_me_patch_default_address(self):
+        User.objects.create_user(email="addr@example.com", password="pass12345")
+        access = self.client.post(
+            self.token_url,
+            {"email": "addr@example.com", "password": "pass12345"},
+            format="json",
+        ).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        res = self.client.patch(
+            self.me_url,
+            {
+                "default_address": {
+                    "street": "100 Congress Ave",
+                    "city": "Austin",
+                    "state": "tx",
+                    "postal_code": "78701",
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["default_address"]["state"], "TX")
+        self.assertEqual(res.data["default_address"]["postal_code"], "78701")
+        u = User.objects.get(email="addr@example.com")
+        self.assertEqual(u.default_address["city"], "Austin")
+
+        clear = self.client.patch(self.me_url, {"default_address": None}, format="json")
+        self.assertEqual(clear.status_code, status.HTTP_200_OK)
+        self.assertIsNone(clear.data.get("default_address"))
+        u.refresh_from_db()
+        self.assertIsNone(u.default_address)
 
     def test_me_rejects_future_birthdate(self):
         User.objects.create_user(email="future@example.com", password="pass12345")

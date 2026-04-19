@@ -5,9 +5,18 @@
  *
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
+ * Optional account default address (`GET/PATCH /auth/me/` `default_address`) prefills step 1 when empty.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { isAxiosError } from 'axios';
+import {
+  defaultAddressToUserAddress,
+  fetchUserProfile,
+  updateUserProfile,
+  userAddressToDefaultPayload,
+} from '../api/profile';
 import { fetchSymptomSessionResume } from '../api/queries';
 import { LinearLoadingBar, useSimulatedProgress } from '../components/LinearLoadingBar';
 import type {
@@ -20,7 +29,7 @@ import {
   validateUserAddress,
   type UserAddress,
 } from '../symptomCheck/addressValidation';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+
 import {
   buildGoogleMapsUrl,
   requestNearbyFacilities,
@@ -30,7 +39,13 @@ import {
 import { priceEstimateCacheFingerprint } from '../symptomCheck/priceEstimateCache';
 import { PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS } from '../symptomCheck/priceEstimateStaticDisclaimer';
 import { parseJsonObjectFromLlm } from '../symptomCheck/parseLlmJson';
+import {
+  INITIAL_ADDRESS_BLURRED,
+  UserAddressFormFields,
+  type AddressFieldKey,
+} from '../symptomCheck/UserAddressFormFields';
 import { US_STATE_OPTIONS, type UsStateCode } from '../symptomCheck/usStates';
+
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
@@ -73,15 +88,6 @@ const INSURANCE_OPTIONS = [
 
 type InsuranceId = (typeof INSURANCE_OPTIONS)[number]['id'];
 
-/** Which address inputs have been blurred; errors show only after blur if still invalid. */
-type AddressFieldKey = 'street' | 'city' | 'state' | 'postalCode';
-
-const INITIAL_ADDRESS_BLURRED: Record<AddressFieldKey, boolean> = {
-  street: false,
-  city: false,
-  state: false,
-  postalCode: false,
-};
 
 function insuranceLabel(id: InsuranceId): string {
   return INSURANCE_OPTIONS.find((o) => o.id === id)?.label ?? id;
@@ -288,9 +294,17 @@ const SymptomCheckPage: React.FC = () => {
     state: '',
     postalCode: '',
   });
-  const [addressFieldBlurred, setAddressFieldBlurred] = useState<
-    Record<AddressFieldKey, boolean>
-  >(INITIAL_ADDRESS_BLURRED);
+  const [addressFieldBlurred, setAddressFieldBlurred] =
+    useState<Record<AddressFieldKey, boolean>>(INITIAL_ADDRESS_BLURRED);
+  /** When true, step-1 address was filled from `GET /auth/me/` `default_address` (not from session storage). */
+  const [addressAutofilledFromProfile, setAddressAutofilledFromProfile] = useState(false);
+  /** After the user clears autofilled fields, avoid immediately re-applying the saved default from the API. */
+  const suppressProfileAutofillRef = useRef(false);
+  const [saveDefaultAddrBusy, setSaveDefaultAddrBusy] = useState(false);
+  const [saveDefaultAddrNotice, setSaveDefaultAddrNotice] = useState<
+    { kind: 'success' } | { kind: 'error'; message: string } | null
+  >(null);
+
   // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<
@@ -371,6 +385,49 @@ const SymptomCheckPage: React.FC = () => {
     () => validateUserAddress(userAddress),
     [userAddress],
   );
+
+  /** If step-1 address is empty and the user has not cleared intentionally, prefill from account `default_address`. */
+  useEffect(() => {
+    if (sessionGate !== "ready") return;
+    if (urlSessionHydrating) return;
+    if (step !== "intake") return;
+    if (suppressProfileAutofillRef.current) return;
+    if (
+      userAddress.street ||
+      userAddress.city ||
+      userAddress.state ||
+      userAddress.postalCode
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await fetchUserProfile();
+        if (cancelled) return;
+        const mapped = defaultAddressToUserAddress(p.default_address);
+        const { valid } = validateUserAddress(mapped);
+        if (!valid) return;
+        setUserAddress(mapped);
+        setAddressAutofilledFromProfile(true);
+      } catch {
+        /* optional enhancement — ignore */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    sessionGate,
+    step,
+    urlSessionHydrating,
+    userAddress.street,
+    userAddress.city,
+    userAddress.state,
+    userAddress.postalCode,
+  ]);
 
   /** Deep link from dashboard: `?session=<uuid>` loads server state and skips the local resume modal. */
   useEffect(() => {
@@ -878,9 +935,12 @@ const SymptomCheckPage: React.FC = () => {
     insurerLabel,
     priceEstimateCacheFingerprintState,
   ]);
-
   const applySnapshotToState = (snap: SymptomCheckSessionSnapshot) => {
     const insId = normalizeInsuranceId(snap.insurance);
+    suppressProfileAutofillRef.current = false;
+    setAddressAutofilledFromProfile(false);
+    setSaveDefaultAddrNotice(null);
+
     setStep(snap.step);
     setSymptoms(snap.symptoms);
     setInsurance(insId);
@@ -911,6 +971,37 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimateCacheFingerprintState(snap.priceEstimateCacheFingerprint ?? null);
     setPendingRequest(null);
     setIntakeSubstep('form');
+  };
+
+  const handleClearAddressFields = () => {
+    suppressProfileAutofillRef.current = true;
+    setAddressAutofilledFromProfile(false);
+    setSaveDefaultAddrNotice(null);
+    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
+  };
+
+  /** Persists the current step-1 address to `PATCH /auth/me/` as `default_address` (requires a valid address). */
+  const handleSaveAsDefaultAddress = async () => {
+    if (!addressValidation.valid) return;
+    setSaveDefaultAddrBusy(true);
+    setSaveDefaultAddrNotice(null);
+    try {
+      await updateUserProfile({
+        default_address: userAddressToDefaultPayload(userAddress),
+      });
+      setSaveDefaultAddrNotice({ kind: "success" });
+      window.setTimeout(() => setSaveDefaultAddrNotice(null), 4000);
+    } catch (e) {
+      let msg = "Could not save. Try again.";
+      if (isAxiosError(e) && e.response?.data) {
+        const d = e.response.data as Record<string, unknown>;
+        if (typeof d.detail === "string") msg = d.detail;
+      }
+      setSaveDefaultAddrNotice({ kind: "error", message: msg });
+    } finally {
+      setSaveDefaultAddrBusy(false);
+    }
   };
 
   /** Restore saved answers and optionally replay the in-flight LLM call from the saved phase. */
@@ -953,10 +1044,14 @@ const SymptomCheckPage: React.FC = () => {
 
   const handleStartOverFromPrompt = () => {
     clearSymptomCheckSession();
+    suppressProfileAutofillRef.current = false;
+    setAddressAutofilledFromProfile(false);
+    setSaveDefaultAddrNotice(null);
     setStep('intake');
     setSymptoms('');
     setInsurance('');
     setUserAddress({ street: '', city: '', state: '', postalCode: '' });
+
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
@@ -978,10 +1073,14 @@ const SymptomCheckPage: React.FC = () => {
     clearSymptomCheckSession();
     followUpMutation.reset();
     resultsMutation.reset();
+    suppressProfileAutofillRef.current = false;
+    setAddressAutofilledFromProfile(false);
+    setSaveDefaultAddrNotice(null);
     setStep('intake');
     setSymptoms('');
     setInsurance('');
     setUserAddress({ street: '', city: '', state: '', postalCode: '' });
+
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
@@ -1709,176 +1808,99 @@ const SymptomCheckPage: React.FC = () => {
               </fieldset>
 
               <div className="pt-10 mt-2 border-t border-outline-variant/15">
-                <fieldset className="border-0 p-0 mx-0 mb-0">
-                  <legend className="block text-sm font-semibold text-on-surface mb-2">
-                    Current address
-                    <span className="text-error ml-1" aria-hidden>
-                      *
-                    </span>
-                  </legend>
-                  <p className="text-xs text-on-surface-variant font-body mb-4">
-                    Used to rank nearby facilities for your situation. US addresses only
-                    (NPPES directory).
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label
-                        className="block text-sm font-semibold text-on-surface mb-2"
-                        htmlFor="addr-street"
-                      >
-                        Street address
-                        <span className="text-error ml-1" aria-hidden>
-                          *
-                        </span>
-                      </label>
-                      <input
-                        aria-invalid={
-                          addressFieldBlurred.street &&
-                          Boolean(addressValidation.errors.street)
-                        }
-                        autoComplete="street-address"
-                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
-                        id="addr-street"
-                        placeholder="123 Main St, Apt 4"
-                        type="text"
-                        value={userAddress.street}
-                        onBlur={() =>
-                          setAddressFieldBlurred((prev) => ({ ...prev, street: true }))
-                        }
-                        onChange={(e) =>
-                          setUserAddress((prev) => ({
-                            ...prev,
-                            street: e.target.value,
-                          }))
-                        }
-                      />
-                      {addressFieldBlurred.street && addressValidation.errors.street ? (
-                        <p className="mt-1 text-xs text-error font-body" role="alert">
-                          {addressValidation.errors.street}
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <label
-                        className="block text-sm font-semibold text-on-surface mb-2"
-                        htmlFor="addr-city"
-                      >
-                        City
-                        <span className="text-error ml-1" aria-hidden>
-                          *
-                        </span>
-                      </label>
-                      <input
-                        aria-invalid={
-                          addressFieldBlurred.city &&
-                          Boolean(addressValidation.errors.city)
-                        }
-                        autoComplete="address-level2"
-                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
-                        id="addr-city"
-                        placeholder="City"
-                        type="text"
-                        value={userAddress.city}
-                        onBlur={() =>
-                          setAddressFieldBlurred((prev) => ({ ...prev, city: true }))
-                        }
-                        onChange={(e) =>
-                          setUserAddress((prev) => ({ ...prev, city: e.target.value }))
-                        }
-                      />
-                      {addressFieldBlurred.city && addressValidation.errors.city ? (
-                        <p className="mt-1 text-xs text-error font-body" role="alert">
-                          {addressValidation.errors.city}
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <label
-                        className="block text-sm font-semibold text-on-surface mb-2"
-                        htmlFor="addr-state"
-                      >
-                        State
-                        <span className="text-error ml-1" aria-hidden>
-                          *
-                        </span>
-                      </label>
-                      <select
-                        aria-invalid={
-                          addressFieldBlurred.state &&
-                          Boolean(addressValidation.errors.state)
-                        }
-                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-inner"
-                        id="addr-state"
-                        value={userAddress.state}
-                        onBlur={() =>
-                          setAddressFieldBlurred((prev) => ({ ...prev, state: true }))
-                        }
-                        onChange={(e) =>
-                          setUserAddress((prev) => ({
-                            ...prev,
-                            state: e.target.value as UsStateCode | '',
-                          }))
-                        }
-                      >
-                        <option value="">Select state</option>
-                        {US_STATE_OPTIONS.map((s) => (
-                          <option key={s.code} value={s.code}>
-                            {s.label}
-                          </option>
-                        ))}
-                      </select>
-                      {addressFieldBlurred.state && addressValidation.errors.state ? (
-                        <p className="mt-1 text-xs text-error font-body" role="alert">
-                          {addressValidation.errors.state}
-                        </p>
-                      ) : null}
-                    </div>
-
-                    <div className="md:col-span-2">
-                      <label
-                        className="block text-sm font-semibold text-on-surface mb-2"
-                        htmlFor="addr-zip"
-                      >
-                        ZIP code
-                        <span className="text-error ml-1" aria-hidden>
-                          *
-                        </span>
-                      </label>
-                      <input
-                        aria-invalid={
-                          addressFieldBlurred.postalCode &&
-                          Boolean(addressValidation.errors.postalCode)
-                        }
-                        inputMode="numeric"
-                        autoComplete="postal-code"
-                        className="w-full max-w-xs bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
-                        id="addr-zip"
-                        maxLength={5}
-                        placeholder="12345"
-                        type="text"
-                        value={userAddress.postalCode}
-                        onBlur={() =>
-                          setAddressFieldBlurred((prev) => ({
-                            ...prev,
-                            postalCode: true,
-                          }))
-                        }
-                        onChange={(e) => {
-                          const v = e.target.value.replace(/\D/g, '').slice(0, 5);
-                          setUserAddress((prev) => ({ ...prev, postalCode: v }));
-                        }}
-                      />
-                      {addressFieldBlurred.postalCode &&
-                      addressValidation.errors.postalCode ? (
-                        <p className="mt-1 text-xs text-error font-body" role="alert">
-                          {addressValidation.errors.postalCode}
-                        </p>
-                      ) : null}
-                    </div>
+                {addressAutofilledFromProfile ? (
+                  <div className="mb-4 flex flex-col gap-3 rounded-xl border border-secondary-fixed/30 bg-secondary-fixed/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="font-body text-xs leading-relaxed text-on-surface sm:max-w-[75%]">
+                      <span className="font-semibold text-secondary">Prefilled from your default address</span>{' '}
+                      (saved in Settings & profile). You can edit these fields or clear them to enter a
+                      different location.
+                    </p>
+                    <button
+                      className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 bg-surface px-4 py-2 font-headline text-xs font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
+                      type="button"
+                      onClick={handleClearAddressFields}
+                    >
+                      Clear address
+                    </button>
                   </div>
-                </fieldset>
+                ) : null}
+                <UserAddressFormFields
+                  addressFieldBlurred={addressFieldBlurred}
+                  errors={addressValidation.errors}
+                  idPrefix="addr"
+                  legend="Current address"
+                  description="Used to rank nearby facilities for your situation. US addresses only (NPPES directory)."
+                  setAddressFieldBlurred={setAddressFieldBlurred}
+                  setUserAddress={setUserAddress}
+                  showRequiredMarkers
+                  userAddress={userAddress}
+                  zipRowEnd={
+                    <>
+                      <button
+                        className="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-primary/35 bg-primary-fixed/15 px-4 py-3 font-headline text-sm font-semibold text-primary shadow-inner transition-colors hover:bg-primary-fixed/25 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                        disabled={!addressValidation.valid || saveDefaultAddrBusy}
+                        type="button"
+                        onClick={() => void handleSaveAsDefaultAddress()}
+                      >
+                        {saveDefaultAddrBusy ? 'Saving…' : 'Save as default address'}
+                      </button>
+                      {saveDefaultAddrNotice?.kind === 'success' ? (
+                        <p className="font-body text-xs text-secondary sm:max-w-[14rem] sm:text-right" role="status">
+                          Saved to your account.
+                        </p>
+                      ) : null}
+                      {saveDefaultAddrNotice?.kind === 'error' ? (
+                        <p className="font-body text-xs text-error sm:max-w-[14rem] sm:text-right" role="alert">
+                          {saveDefaultAddrNotice.message}
+                        </p>
+                      ) : null}
+                    </>
+                  }
+                  onUserEdit={() => {
+                    setAddressAutofilledFromProfile(false);
+                    setSaveDefaultAddrNotice(null);
+                  }}
+                />
+
+                  </div>
+                ) : null}
+                <UserAddressFormFields
+                  addressFieldBlurred={addressFieldBlurred}
+                  errors={addressValidation.errors}
+                  idPrefix="addr"
+                  legend="Current address"
+                  description="Used to rank nearby facilities for your situation. US addresses only (NPPES directory)."
+                  setAddressFieldBlurred={setAddressFieldBlurred}
+                  setUserAddress={setUserAddress}
+                  showRequiredMarkers
+                  userAddress={userAddress}
+                  zipRowEnd={
+                    <>
+                      <button
+                        className="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-primary/35 bg-primary-fixed/15 px-4 py-3 font-headline text-sm font-semibold text-primary shadow-inner transition-colors hover:bg-primary-fixed/25 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                        disabled={!addressValidation.valid || saveDefaultAddrBusy}
+                        type="button"
+                        onClick={() => void handleSaveAsDefaultAddress()}
+                      >
+                        {saveDefaultAddrBusy ? "Saving…" : "Save as default address"}
+                      </button>
+                      {saveDefaultAddrNotice?.kind === "success" ? (
+                        <p className="font-body text-xs text-secondary sm:max-w-[14rem] sm:text-right" role="status">
+                          Saved to your account.
+                        </p>
+                      ) : null}
+                      {saveDefaultAddrNotice?.kind === "error" ? (
+                        <p className="font-body text-xs text-error sm:max-w-[14rem] sm:text-right" role="alert">
+                          {saveDefaultAddrNotice.message}
+                        </p>
+                      ) : null}
+                    </>
+                  }
+                  onUserEdit={() => {
+                    setAddressAutofilledFromProfile(false);
+                    setSaveDefaultAddrNotice(null);
+                  }}
+                />
               </div>
 
               {llmError ? (
