@@ -46,6 +46,28 @@ def _names_from_extracted(entries: list[Any]) -> list[str]:
     return out
 
 
+def distinct_active_names_from_entries(entries: list[Any]) -> list[str]:
+    """
+    Distinct active medication display names from an in-memory extraction list.
+
+    Same active-status rules as ``get_active_medication_names`` but without reading
+    the database (used by the full medication safety check before recall queries).
+    """
+    if not isinstance(entries, list):
+        return []
+    medications = _names_from_extracted(entries)
+    if not medications:
+        return []
+    seen: set[str] = set()
+    unique: list[str] = []
+    for m in medications:
+        key = m.casefold()
+        if key not in seen:
+            seen.add(key)
+            unique.append(m)
+    return unique
+
+
 def get_active_medication_names(user) -> list[str]:
     """
     Return distinct medication display names from the latest profile that are considered active.

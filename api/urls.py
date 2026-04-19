@@ -12,7 +12,7 @@ from .views import (
     UserSymptomSessionRetrieveView,
     UserSymptomSessionsListView,
 )
-from .views_medication import MedicationProfileExtractView
+from .views_medication import MedicationCheckView, MedicationProfileExtractView
 from .views_symptom import (
     SymptomChatView,
     SymptomNearbyFacilitiesView,
@@ -28,6 +28,11 @@ urlpatterns = [
         "medication-profile/extract/",
         MedicationProfileExtractView.as_view(),
         name="medication-profile-extract",
+    ),
+    path(
+        "medication/check/",
+        MedicationCheckView.as_view(),
+        name="medication-check",
     ),
     path(
         "sessions/<uuid:session_public_id>/",

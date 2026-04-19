@@ -26,11 +26,27 @@ class SymptomSessionResumeDetailTests(APITestCase):
         sid = str(uuid.uuid4())
         res = bare.get(f"/api/sessions/{sid}/")
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        res_del = bare.delete(f"/api/sessions/{sid}/")
+        self.assertEqual(res_del.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_404_wrong_user(self):
         s = SymptomSession.objects.create(user=self.other)
         res = self.client.get(f"/api/sessions/{s.public_id}/")
         self.assertEqual(res.status_code, status.HTTP_404_NOT_FOUND)
+        res_del = self.client.delete(f"/api/sessions/{s.public_id}/")
+        self.assertEqual(res_del.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_delete_own_session(self):
+        s = SymptomSession.objects.create(
+            user=self.user,
+            ai_conversation_log=[
+                {"role": "user", "content": "x", "timestamp": "2026-01-01T00:00:00"},
+            ],
+        )
+        pk = s.pk
+        res = self.client.delete(f"/api/sessions/{s.public_id}/")
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(SymptomSession.objects.filter(pk=pk).exists())
 
     def test_resume_followup_one_survey_turn(self):
         s = SymptomSession.objects.create(

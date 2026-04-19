@@ -8,6 +8,7 @@ from rest_framework.test import APIClient, APITestCase
 from api.models import MedicationProfile
 from api.services.medication_profile_service import (
     core_drug_query_term,
+    distinct_active_names_from_entries,
     get_active_medication_names,
 )
 from api.services.openfda_recall_service import (
@@ -52,6 +53,19 @@ class MedicationProfileServiceTests(TestCase):
 
     def test_core_drug_query_strips_dose(self):
         self.assertEqual(core_drug_query_term("Lisinopril 10mg"), "Lisinopril")
+
+    def test_distinct_active_names_from_entries(self):
+        names = distinct_active_names_from_entries(
+            [
+                {"name": "A", "status": "active"},
+                {"name": "a", "status": "active"},
+                {"name": "B", "status": "stopped"},
+            ]
+        )
+        self.assertEqual(names, ["A"])
+
+    def test_distinct_active_names_non_list(self):
+        self.assertEqual(distinct_active_names_from_entries(None), [])
 
 
 class OpenfdaRecallServiceTests(TestCase):
