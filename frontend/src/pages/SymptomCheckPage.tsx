@@ -1011,37 +1011,6 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
-  const handleClearAddressFields = () => {
-    suppressProfileAutofillRef.current = true;
-    setAddressAutofilledFromProfile(false);
-    setSaveDefaultAddrNotice(null);
-    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
-    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
-  };
-
-  /** Persists the current step-1 address to `PATCH /auth/me/` as `default_address` (requires a valid address). */
-  const handleSaveAsDefaultAddress = async () => {
-    if (!addressValidation.valid) return;
-    setSaveDefaultAddrBusy(true);
-    setSaveDefaultAddrNotice(null);
-    try {
-      await updateUserProfile({
-        default_address: userAddressToDefaultPayload(userAddress),
-      });
-      setSaveDefaultAddrNotice({ kind: "success" });
-      window.setTimeout(() => setSaveDefaultAddrNotice(null), 4000);
-    } catch (e) {
-      let msg = "Could not save. Try again.";
-      if (isAxiosError(e) && e.response?.data) {
-        const d = e.response.data as Record<string, unknown>;
-        if (typeof d.detail === "string") msg = d.detail;
-      }
-      setSaveDefaultAddrNotice({ kind: "error", message: msg });
-    } finally {
-      setSaveDefaultAddrBusy(false);
-    }
-  };
-
   /** Restore saved answers and optionally replay the in-flight LLM call from the saved phase. */
   const handleResumeSession = () => {
     const snap = readSymptomCheckSession();
