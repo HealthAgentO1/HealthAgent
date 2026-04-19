@@ -22,6 +22,8 @@ venv/
 dist/
 build/
 
+data/
+
 # Django
 *.log
 local_settings.py
