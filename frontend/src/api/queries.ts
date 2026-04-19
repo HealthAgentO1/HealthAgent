@@ -20,6 +20,8 @@ export interface SymptomSession {
   booking_status: string;
   pre_visit_report: any | null;
   created_at: string;
+  /** Present on some booking endpoints when a mock confirmation is returned. */
+  confirmation_number?: string;
 }
 
 export interface CreateSymptomSessionData {
@@ -38,8 +40,10 @@ const fetchProviders = async (zip: string, specialty?: string): Promise<Provider
   return data;
 };
 
-// Create symptom session
-const createSymptomSession = async (data: CreateSymptomSessionData): Promise<SymptomSession> => {
+// Create symptom session (exported for future flows; not yet wired in the UI)
+export const createSymptomSession = async (
+  data: CreateSymptomSessionData,
+): Promise<SymptomSession> => {
   const { data: response } = await apiClient.post<SymptomSession>("/symptom-sessions/", data);
   return response;
 };

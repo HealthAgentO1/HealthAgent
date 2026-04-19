@@ -1,12 +1,20 @@
 /**
  * Symptom Check: three-step flow. Steps 2–3 call Django `POST /api/symptom/survey-llm/`
- * via `symptomLlmClient` (JWT on `apiClient`). Hospitals and cost blurbs stay static mocks.
+ * via `symptomLlmClient` (JWT on `apiClient`). Step 3 loads nearby facilities from
+ * `POST /api/symptom/nearby-facilities/` (NPPES + Census geocoding via Django).
  *
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
  */
 import React, { useEffect, useMemo, useState } from "react";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
+import { validateUserAddress, type UserAddress } from "../symptomCheck/addressValidation";
+import {
+  buildGoogleMapsUrl,
+  requestNearbyFacilities,
+  type NearbyFacility,
+} from "../symptomCheck/nppesFacilitiesClient";
+import { US_STATE_OPTIONS, type UsStateCode } from "../symptomCheck/usStates";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
@@ -31,35 +39,15 @@ const INSURANCE_OPTIONS = [
 
 type InsuranceId = (typeof INSURANCE_OPTIONS)[number]["id"];
 
-const MOCK_HOSPITALS = [
-  {
-    name: "Riverside Medical Center",
-    distance: "1.2 mi",
-    address: "1200 Harbor Blvd",
-    careExample: "an urgent evaluation for acute abdominal pain",
-    costLow: 420,
-    costHigh: 1180,
-    costMid: 780,
-  },
-  {
-    name: "Summit Regional Hospital",
-    distance: "3.4 mi",
-    address: "88 Lakeside Dr",
-    careExample: "an urgent evaluation for acute abdominal pain",
-    costLow: 380,
-    costHigh: 1050,
-    costMid: 695,
-  },
-  {
-    name: "Oakwood Emergency Pavilion",
-    distance: "4.8 mi",
-    address: "401 Northcrest Ave",
-    careExample: "an urgent evaluation for acute abdominal pain",
-    costLow: 510,
-    costHigh: 1320,
-    costMid: 895,
-  },
-] as const;
+/** Which address inputs have been blurred; errors show only after blur if still invalid. */
+type AddressFieldKey = "street" | "city" | "state" | "postalCode";
+
+const INITIAL_ADDRESS_BLURRED: Record<AddressFieldKey, boolean> = {
+  street: false,
+  city: false,
+  state: false,
+  postalCode: false,
+};
 
 function insuranceLabel(id: InsuranceId): string {
   return INSURANCE_OPTIONS.find((o) => o.id === id)?.label ?? id;
@@ -72,13 +60,16 @@ function normalizeInsuranceId(id: string): InsuranceId | "" {
   return found ? found.id : "";
 }
 
-function buildCostNarrative(
-  insurerLabel: string,
-  hospital: (typeof MOCK_HOSPITALS)[number],
-): string {
-  const fmt = (n: number) =>
-    `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-  return `Based on publicly posted in-network prices for ${insurerLabel} tied to ${hospital.name} for ${hospital.careExample}, many plans show negotiated amounts roughly between ${fmt(hospital.costLow)} and ${fmt(hospital.costHigh)}, with a common midpoint around ${fmt(hospital.costMid)}.\n\nThis is not your personal cost; your deductible/coinsurance can change what you pay.`;
+/** Illustrative cost copy is not tied to specific facilities until billing integration lands. */
+function buildGenericCostNarrative(insurerLabel: string): string {
+  return `Based on publicly posted in-network prices for ${insurerLabel}, negotiated amounts vary widely by facility, procedure code, and plan design. This is not your personal cost; your deductible and coinsurance can change what you pay.\n\nFacility-specific price examples are not shown in this preview.`;
+}
+
+/** Buckets Django `relevance_score` (NPI registry heuristics; public reviews are not available there). */
+function facilityListingFitLabel(score: number): string {
+  if (score >= 10) return "Stronger directory match (name & facility type)";
+  if (score >= 5) return "Typical facility listing";
+  return "Weaker directory signals — confirm before visiting";
 }
 
 /** Default control values so required validation and sliders start in a defined state. */
@@ -135,6 +126,15 @@ const SymptomCheckPage: React.FC = () => {
   const [step, setStep] = useState<FlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
+  /** Step 1: practice location for NPPES distance ranking (mirrored to `symptomCheckSession`). */
+  const [userAddress, setUserAddress] = useState<UserAddress>({
+    street: "",
+    city: "",
+    state: "",
+    postalCode: "",
+  });
+  const [addressFieldBlurred, setAddressFieldBlurred] =
+    useState<Record<AddressFieldKey, boolean>>(INITIAL_ADDRESS_BLURRED);
   // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
@@ -142,6 +142,11 @@ const SymptomCheckPage: React.FC = () => {
   // Serializes Continue / See results while `requestFollowUpQuestions` or `requestConditionAssessment` runs.
   const [pendingRequest, setPendingRequest] = useState<null | "followup" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
+  /** Step 3: NPPES-backed facilities (sorted nearest-first on the server). */
+  const [nearbyFacilities, setNearbyFacilities] = useState<NearbyFacility[] | null>(null);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyError, setNearbyError] = useState<string | null>(null);
+  const [nearbyTaxonomyUsed, setNearbyTaxonomyUsed] = useState<string | null>(null);
 
   /**
    * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
@@ -154,7 +159,9 @@ const SymptomCheckPage: React.FC = () => {
     return "ready";
   });
 
-  const intakeValid = symptoms.trim().length > 0 && insurance !== "";
+  const addressValidation = useMemo(() => validateUserAddress(userAddress), [userAddress]);
+  const intakeValid =
+    symptoms.trim().length > 0 && insurance !== "" && addressValidation.valid;
 
   const followUpValid = followUpAnswersSatisfy(followUpQuestions, followUpAnswers);
 
@@ -248,6 +255,12 @@ const SymptomCheckPage: React.FC = () => {
       step,
       symptoms,
       insurance,
+      address: {
+        street: userAddress.street,
+        city: userAddress.city,
+        state: userAddress.state,
+        postalCode: userAddress.postalCode,
+      },
       followUpQuestions,
       followUpAnswers,
       results,
@@ -260,6 +273,7 @@ const SymptomCheckPage: React.FC = () => {
     step,
     symptoms,
     insurance,
+    userAddress,
     followUpQuestions,
     followUpAnswers,
     results,
@@ -267,10 +281,80 @@ const SymptomCheckPage: React.FC = () => {
     llmError,
   ]);
 
+  /** After the LLM returns `care_taxonomy`, ask Django to rank NPPES facilities by road distance (via geocoding). */
+  useEffect(() => {
+    if (step !== "results") {
+      setNearbyFacilities(null);
+      setNearbyError(null);
+      setNearbyTaxonomyUsed(null);
+      setNearbyLoading(false);
+      return;
+    }
+    if (!results) return;
+
+    if (!addressValidation.valid) {
+      setNearbyFacilities(null);
+      setNearbyTaxonomyUsed(null);
+      setNearbyError(
+        "Add a valid US address on step 1 to see nearby facilities. Go back to the first step, enter your address, then continue.",
+      );
+      setNearbyLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setNearbyLoading(true);
+    setNearbyError(null);
+    setNearbyFacilities(null);
+    setNearbyTaxonomyUsed(null);
+
+    const run = async () => {
+      try {
+        const payload = await requestNearbyFacilities({
+          street: userAddress.street.trim(),
+          city: userAddress.city.trim(),
+          state: userAddress.state,
+          postal_code: userAddress.postalCode.trim(),
+          taxonomy_codes: results.care_taxonomy.taxonomy_codes,
+          suggested_care_setting: results.care_taxonomy.suggested_care_setting,
+        });
+        if (cancelled) return;
+        setNearbyFacilities(payload.facilities);
+        setNearbyTaxonomyUsed(payload.taxonomy_used);
+      } catch (e) {
+        if (cancelled) return;
+        setNearbyFacilities(null);
+        setNearbyError(e instanceof Error ? e.message : "Unable to load nearby facilities.");
+      } finally {
+        if (!cancelled) setNearbyLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    step,
+    results,
+    addressValidation.valid,
+    userAddress.street,
+    userAddress.city,
+    userAddress.state,
+    userAddress.postalCode,
+  ]);
+
   const applySnapshotToState = (snap: SymptomCheckSessionSnapshot) => {
     setStep(snap.step);
     setSymptoms(snap.symptoms);
     setInsurance(normalizeInsuranceId(snap.insurance));
+    setUserAddress({
+      street: snap.address.street,
+      city: snap.address.city,
+      state: (snap.address.state as UsStateCode | "") || "",
+      postalCode: snap.address.postalCode,
+    });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions(snap.followUpQuestions);
     setFollowUpAnswers(snap.followUpAnswers);
     setResults(snap.results);
@@ -312,6 +396,8 @@ const SymptomCheckPage: React.FC = () => {
     setStep("intake");
     setSymptoms("");
     setInsurance("");
+    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
     setResults(null);
@@ -325,6 +411,8 @@ const SymptomCheckPage: React.FC = () => {
     setStep("intake");
     setSymptoms("");
     setInsurance("");
+    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
     setResults(null);
@@ -627,7 +715,7 @@ const SymptomCheckPage: React.FC = () => {
                 </p>
               </div>
 
-              <fieldset className="border-0 p-0 m-0">
+              <fieldset className="border-0 p-0 mx-0 mb-0">
                 <legend className="block text-sm font-semibold text-on-surface mb-3">
                   Insurance provider
                   <span className="text-error ml-1" aria-hidden>
@@ -663,6 +751,168 @@ const SymptomCheckPage: React.FC = () => {
                 </div>
               </fieldset>
 
+              <div className="pt-10 mt-2 border-t border-outline-variant/15">
+                <fieldset className="border-0 p-0 mx-0 mb-0">
+                  <legend className="block text-sm font-semibold text-on-surface mb-2">
+                    Current address
+                    <span className="text-error ml-1" aria-hidden>
+                      *
+                    </span>
+                  </legend>
+                  <p className="text-xs text-on-surface-variant font-body mb-4">
+                    Used to rank nearby facilities for your situation. US addresses only (NPPES directory).
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-street"
+                      >
+                        Street address
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <input
+                        aria-invalid={
+                          addressFieldBlurred.street && Boolean(addressValidation.errors.street)
+                        }
+                        autoComplete="street-address"
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
+                        id="addr-street"
+                        placeholder="123 Main St, Apt 4"
+                        type="text"
+                        value={userAddress.street}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, street: true }))
+                        }
+                        onChange={(e) =>
+                          setUserAddress((prev) => ({ ...prev, street: e.target.value }))
+                        }
+                      />
+                      {addressFieldBlurred.street && addressValidation.errors.street ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.street}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-city"
+                      >
+                        City
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <input
+                        aria-invalid={
+                          addressFieldBlurred.city && Boolean(addressValidation.errors.city)
+                        }
+                        autoComplete="address-level2"
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
+                        id="addr-city"
+                        placeholder="City"
+                        type="text"
+                        value={userAddress.city}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, city: true }))
+                        }
+                        onChange={(e) =>
+                          setUserAddress((prev) => ({ ...prev, city: e.target.value }))
+                        }
+                      />
+                      {addressFieldBlurred.city && addressValidation.errors.city ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.city}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-state"
+                      >
+                        State
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <select
+                        aria-invalid={
+                          addressFieldBlurred.state && Boolean(addressValidation.errors.state)
+                        }
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-inner"
+                        id="addr-state"
+                        value={userAddress.state}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, state: true }))
+                        }
+                        onChange={(e) =>
+                          setUserAddress((prev) => ({
+                            ...prev,
+                            state: e.target.value as UsStateCode | "",
+                          }))
+                        }
+                      >
+                        <option value="">Select state</option>
+                        {US_STATE_OPTIONS.map((s) => (
+                          <option key={s.code} value={s.code}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                      {addressFieldBlurred.state && addressValidation.errors.state ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.state}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-zip"
+                      >
+                        ZIP code
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <input
+                        aria-invalid={
+                          addressFieldBlurred.postalCode &&
+                          Boolean(addressValidation.errors.postalCode)
+                        }
+                        inputMode="numeric"
+                        autoComplete="postal-code"
+                        className="w-full max-w-xs bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
+                        id="addr-zip"
+                        maxLength={5}
+                        placeholder="12345"
+                        type="text"
+                        value={userAddress.postalCode}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, postalCode: true }))
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, "").slice(0, 5);
+                          setUserAddress((prev) => ({ ...prev, postalCode: v }));
+                        }}
+                      />
+                      {addressFieldBlurred.postalCode && addressValidation.errors.postalCode ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.postalCode}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </fieldset>
+              </div>
+
               {llmError ? (
                 <p className="text-sm text-error font-body" role="alert">
                   {llmError}
@@ -681,7 +931,7 @@ const SymptomCheckPage: React.FC = () => {
                 </button>
                 {!intakeValid && (
                   <p className="text-xs text-on-surface-variant font-body">
-                    Add a symptom description and choose an insurer to continue.
+                    Add symptoms, choose an insurer, and complete your address to continue.
                   </p>
                 )}
               </div>
@@ -814,27 +1064,123 @@ const SymptomCheckPage: React.FC = () => {
             </section>
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
-              <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+              <h2 className="text-xl font-headline font-bold text-primary mb-2 flex items-center gap-2">
                 <span className="material-symbols-outlined text-secondary">local_hospital</span>
                 Nearby hospitals
               </h2>
-              <ul className="space-y-4">
-                {MOCK_HOSPITALS.map((h) => (
-                  <li
-                    key={h.name}
-                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-surface rounded-xl p-4 border border-outline-variant/15"
-                  >
-                    <div>
-                      <p className="font-headline font-bold text-on-surface">{h.name}</p>
-                      <p className="text-sm text-on-surface-variant font-body mt-1">{h.address}</p>
-                    </div>
-                    <div className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md self-start sm:self-center">
-                      <span className="material-symbols-outlined text-base">near_me</span>
-                      {h.distance}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed">
+                Order is <strong className="text-on-surface">relevance-aware</strong>: we combine
+                straight-line distance with a heuristic score from the public NPI directory (name
+                keywords, facility type, and multi-site signals). Patient reviews are{" "}
+                <strong className="text-on-surface">not</strong> in that registry—so farther
+                listings can rank higher when they look like established care sites.
+              </p>
+              {nearbyTaxonomyUsed ? (
+                <p className="text-xs text-on-surface-variant font-body mb-4">
+                  Directory search used NUCC taxonomy code{" "}
+                  <span className="font-mono text-on-surface">{nearbyTaxonomyUsed}</span> from your
+                  assessment.
+                </p>
+              ) : null}
+
+              {nearbyLoading ? (
+                <p className="text-sm text-on-surface-variant font-body">Loading nearby facilities…</p>
+              ) : null}
+
+              {nearbyError ? (
+                <p className="text-sm text-error font-body" role="alert">
+                  {nearbyError}
+                </p>
+              ) : null}
+
+              {!nearbyLoading && !nearbyError && nearbyFacilities && nearbyFacilities.length === 0 ? (
+                <p className="text-sm text-on-surface-variant font-body">
+                  No facilities matched this search. Try adjusting your ZIP or try again later.
+                </p>
+              ) : null}
+
+              {!nearbyLoading && !nearbyError && nearbyFacilities && nearbyFacilities.length > 0 ? (
+                <div className="space-y-4">
+                  <ul className="space-y-4">
+                    {nearbyFacilities.slice(0, 3).map((h) => (
+                      <li
+                        key={h.npi}
+                        className="flex flex-col gap-3 bg-surface rounded-xl p-4 border border-outline-variant/15"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div>
+                            <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                            <p className="text-sm text-on-surface-variant font-body mt-1">
+                              {h.address_line}
+                            </p>
+                            <p className="text-xs text-on-surface-variant/85 font-body mt-1">
+                              {facilityListingFitLabel(h.relevance_score)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                            <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
+                              <span className="material-symbols-outlined text-base">near_me</span>
+                              {h.distance_label}
+                            </span>
+                            <a
+                              className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
+                              href={buildGoogleMapsUrl(h.address_line)}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <span className="material-symbols-outlined text-base">map</span>
+                              Maps
+                            </a>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {nearbyFacilities.length > 3 ? (
+                    <details className="rounded-xl border border-outline-variant/15 bg-surface px-4 py-3">
+                      <summary className="cursor-pointer text-sm font-semibold text-primary font-headline">
+                        Show more facilities ({nearbyFacilities.length - 3} more)
+                      </summary>
+                      <ul className="mt-4 space-y-4">
+                        {nearbyFacilities.slice(3).map((h) => (
+                          <li
+                            key={h.npi}
+                            className="flex flex-col gap-3 border-t border-outline-variant/10 pt-4 first:border-t-0 first:pt-0"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                              <div>
+                                <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                                <p className="text-sm text-on-surface-variant font-body mt-1">
+                                  {h.address_line}
+                                </p>
+                                <p className="text-xs text-on-surface-variant/85 font-body mt-1">
+                                  {facilityListingFitLabel(h.relevance_score)}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                                <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
+                                  <span className="material-symbols-outlined text-base">near_me</span>
+                                  {h.distance_label}
+                                </span>
+                                <a
+                                  className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
+                                  href={buildGoogleMapsUrl(h.address_line)}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  <span className="material-symbols-outlined text-base">map</span>
+                                  Maps
+                                </a>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
@@ -843,32 +1189,23 @@ const SymptomCheckPage: React.FC = () => {
                 Estimated cost context
               </h2>
               <p className="text-sm text-on-surface-variant font-body mb-6">
-                Illustrative ranges for{" "}
-                <strong className="text-on-surface">{insurerLabel}</strong> at each facility, using
-                the same type of visit as an example.
+                Illustrative guidance for <strong className="text-on-surface">{insurerLabel}</strong>{" "}
+                — not tied to the facilities listed above until billing integration is enabled.
               </p>
-              <div className="space-y-6">
-                {MOCK_HOSPITALS.map((h) => (
-                  <article
-                    key={h.name}
-                    className="bg-surface rounded-xl p-5 border border-outline-variant/15"
-                  >
-                    <h3 className="font-headline text-base font-bold text-on-surface mb-3">{h.name}</h3>
-                    {buildCostNarrative(insurerLabel, h)
-                      .split("\n\n")
-                      .map((para, i) => (
-                        <p
-                          key={i}
-                          className={`text-sm text-on-surface font-body leading-relaxed ${
-                            i > 0 ? "mt-3 text-on-surface-variant" : ""
-                          }`}
-                        >
-                          {para}
-                        </p>
-                      ))}
-                  </article>
-                ))}
-              </div>
+              <article className="bg-surface rounded-xl p-5 border border-outline-variant/15">
+                {buildGenericCostNarrative(insurerLabel)
+                  .split("\n\n")
+                  .map((para, i) => (
+                    <p
+                      key={i}
+                      className={`text-sm text-on-surface font-body leading-relaxed ${
+                        i > 0 ? "mt-3 text-on-surface-variant" : ""
+                      }`}
+                    >
+                      {para}
+                    </p>
+                  ))}
+              </article>
             </section>
 
             <div className="flex flex-wrap gap-3 justify-center">

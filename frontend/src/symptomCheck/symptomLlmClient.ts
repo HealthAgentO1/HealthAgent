@@ -4,6 +4,7 @@
  *
  * System prompts are bundled from `prompts/*.txt` (Vite `?raw`). API keys stay on the server.
  * Requires a JWT (`apiClient`); unauthenticated users get a clear error from the handler.
+ * Nearby NPPES lookup is handled separately in `nppesFacilitiesClient.ts` (not this module).
  */
 import axios from "axios";
 import followupContext from "./prompts/followup_context.txt?raw";
@@ -104,12 +105,7 @@ export async function requestConditionAssessment(input: {
 
   const raw = await postSymptomSurveyLlm(body);
   const parsed = parseJsonObjectFromLlm(raw);
-  const validated = validateSymptomResultsPayload(parsed);
-
-  // UI intentionally omits this; a future Django/NPPES step will consume it.
-  console.info("[symptom-check] care_taxonomy (debug, downstream API)", validated.care_taxonomy);
-
-  return validated;
+  return validateSymptomResultsPayload(parsed);
 }
 
 export type { FollowUpQuestionsPayload, SymptomResultsPayload, SymptomLlmPhase };
