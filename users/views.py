@@ -12,7 +12,7 @@ class RegisterView(generics.CreateAPIView):
 
 
 class MeView(generics.RetrieveUpdateAPIView):
-    """Read or update the authenticated user's profile (name, birth date)."""
+    """Read or update the authenticated user's profile (name, birth date, optional default US address)."""
 
     permission_classes = [IsAuthenticated]
     serializer_class = UserProfileSerializer

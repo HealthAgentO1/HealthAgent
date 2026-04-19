@@ -50,6 +50,8 @@ Inside the app directory, you will commonly find or create:
 
 Beyond thin views, feature logic often lives under **`api/services/`**. Examples: **`symptom_llm.py`** (LLM calls for chat and survey turns), **`report_service.py`** (pre-visit report prompt, parsing, and merging medication lines from survey payloads or `MedicationProfile`), **`nppes_nearby.py`** (facility search), **`survey_session_persist.py`** (append structured survey turns to `SymptomSession.ai_conversation_log`). See **`docs/architecture.md`** for how these pieces connect to the React app.
 
+The **`users`** app defines **`User`** (`users/models.py`), including an optional JSON **`default_address`** (street, city, state, postal code) edited via **`GET` / `PATCH /api/auth/me/`** (`users/views.py` `MeView`, `users/serializers.py`) so the React settings page and Symptom Check can share one stored US address shape.
+
 ## Getting Started Workflow
 
 Whenever adding new functionality, you usually follow this loop:
