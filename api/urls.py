@@ -6,12 +6,13 @@ from users.views import RegisterView
 
 from .views import (
     ExampleItemViewSet,
+    MedicationRecallsView,
     ProvidersView,
     SymptomSessionViewSet,
     UserSymptomSessionRetrieveView,
     UserSymptomSessionsListView,
 )
-from .views_medication import MedicationProfileExtractView
+from .views_medication import MedicationCheckView, MedicationProfileExtractView
 from .views_symptom import (
     SymptomChatView,
     SymptomNearbyFacilitiesView,
@@ -29,6 +30,11 @@ urlpatterns = [
         name="medication-profile-extract",
     ),
     path(
+        "medication/check/",
+        MedicationCheckView.as_view(),
+        name="medication-check",
+    ),
+    path(
         "sessions/<uuid:session_public_id>/",
         UserSymptomSessionRetrieveView.as_view(),
         name="symptom-session-detail",
@@ -43,6 +49,11 @@ urlpatterns = [
         name="symptom-nearby-facilities",
     ),
     path("providers/", ProvidersView.as_view(), name="providers"),
+    path(
+        "medications/recalls/",
+        MedicationRecallsView.as_view(),
+        name="medication-recalls",
+    ),
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),

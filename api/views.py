@@ -27,9 +27,10 @@ class UserSymptomSessionsListView(generics.ListAPIView):
         )
 
 
-class UserSymptomSessionRetrieveView(generics.RetrieveAPIView):
+class UserSymptomSessionRetrieveView(generics.RetrieveDestroyAPIView):
     """
     GET /api/sessions/<uuid>/ — resume payload for Symptom Check deep links from the dashboard.
+    DELETE /api/sessions/<uuid>/ — remove one saved session (same auth and ownership rules as GET).
     """
 
     serializer_class = SymptomSessionResumeSerializer
@@ -99,6 +100,8 @@ from django.http import Http404
 import logging
 
 from .services.nppes_service import NPPESService, ProviderDataMapper
+from .services.medication_profile_service import get_active_medication_names
+from .services.openfda_recall_service import fetch_recalls_for_medications
 
 logger = logging.getLogger(__name__)
 
@@ -156,3 +159,28 @@ class ProvidersView(APIView):
                 {'error': 'Failed to search providers. Please try again.'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class MedicationRecallsView(APIView):
+    """
+    GET /api/medications/recalls/
+
+    Query openFDA drug enforcement for active medications on the user's latest
+    MedicationProfile. Returns mapped classification (I / II / III) and reason_for_recall.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        meds = get_active_medication_names(request.user)
+        if not meds:
+            return Response(
+                {
+                    "medications_checked": [],
+                    "recalls": [],
+                    "errors": [],
+                    "detail": "No medication profile found or no active medications.",
+                }
+            )
+        payload = fetch_recalls_for_medications(meds)
+        return Response(payload)
