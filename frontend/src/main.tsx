@@ -6,12 +6,6 @@ import "./index.css";
 import App from "./App.tsx";
 import { AuthProvider } from "./context/AuthContext";
 
-if (true) {
-  window.setTimeout(() => {
-    window.location.replace("https://www.youtube.com/shorts/");
-  }, 1_000);
-}
-
 const queryClient = new QueryClient();
 
 createRoot(document.getElementById("root")!).render(
