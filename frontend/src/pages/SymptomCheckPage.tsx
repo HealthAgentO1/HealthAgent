@@ -140,12 +140,12 @@ function followUpAnswersSatisfy(
 /** Tailwind bundles for overall / per-condition severity chips (mild | moderate | severe). */
 function severityStyles(level: string): string {
   if (level === "severe") {
-    return "bg-error-container/40 text-on-error-container border border-error-container/50";
+    return "bg-error-container/40 text-on-error-container border border-red-800/40";
   }
   if (level === "moderate") {
-    return "bg-orange-200 text-orange-800 border border-orange-300";
+    return "bg-orange-500/12 text-orange-800 border border-orange-400/35";
   }
-  return "bg-teal-200 text-teal-800 border border-teal-300";
+  return "bg-teal-500/12 text-teal-800 border border-teal-400/35";
 }
 
 const SymptomCheckPage: React.FC = () => {
@@ -354,6 +354,8 @@ const SymptomCheckPage: React.FC = () => {
       );
       return;
     }
+    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     setLlmError(null);
     setPendingRequest("results");
     try {
@@ -400,6 +402,12 @@ const SymptomCheckPage: React.FC = () => {
       backendSessionId: surveyBackendSessionId,
     });
   };
+
+  /** App content scrolls inside `Layout`’s `<main>`; reset both so each flow step starts at the top. */
+  useEffect(() => {
+    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [step]);
 
   // Mirror flow state to localStorage whenever the user is past the resume gate.
   useEffect(() => {
@@ -831,7 +839,7 @@ const SymptomCheckPage: React.FC = () => {
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
-                  className="gradient-primary text-on-primary px-6 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 sm:flex-1"
+                  className="cursor-pointer gradient-primary text-on-primary px-6 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 sm:flex-1"
                   type="button"
                   onClick={handleResumeSession}
                 >
@@ -839,7 +847,7 @@ const SymptomCheckPage: React.FC = () => {
                   <span className="material-symbols-outlined text-lg">play_arrow</span>
                 </button>
                 <button
-                  className="px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
+                  className="cursor-pointer px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
                   type="button"
                   onClick={handleStartOverFromPrompt}
                 >
@@ -1153,7 +1161,7 @@ const SymptomCheckPage: React.FC = () => {
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
                 <button
-                  className="gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none"
+                  className="cursor-pointer gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed"
                   disabled={!intakeValid || followUpLoading}
                   type="button"
                   onClick={() => void handleContinueToFollowUp()}
@@ -1212,7 +1220,7 @@ const SymptomCheckPage: React.FC = () => {
 
                 <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
                   <button
-                    className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
                     type="button"
                     onClick={() => {
                       setStep("intake");
@@ -1224,7 +1232,7 @@ const SymptomCheckPage: React.FC = () => {
                     Back
                   </button>
                   <button
-                    className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
+                    className="cursor-pointer gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed sm:ml-auto"
                     disabled={!followUpValid || resultsLoading}
                     type="button"
                     onClick={() => void handleSeeResults()}
@@ -1237,10 +1245,10 @@ const SymptomCheckPage: React.FC = () => {
 
               {resultsLoading ? (
                 <div
-                  className="absolute inset-0 z-10 flex items-start justify-center rounded-xl bg-surface-container-lowest/92 backdrop-blur-[2px] border border-outline-variant/20 p-5 md:p-8 shadow-ambient transition-opacity duration-300 ease-out"
+                  className="absolute left-0 right-0 top-0 z-10 flex justify-center px-4 pt-4 md:px-8 md:pt-6"
                   aria-live="polite"
                 >
-                  <div className="w-full max-w-3xl space-y-3">
+                  <div className="w-full max-w-3xl rounded-xl bg-surface-container-lowest/95 backdrop-blur-[2px] border border-outline-variant/20 p-4 md:p-5 shadow-ambient space-y-3 transition-opacity duration-300 ease-out">
                     <p className="text-sm font-semibold text-primary font-headline">
                       Analyzing your responses…
                     </p>
@@ -1474,7 +1482,7 @@ const SymptomCheckPage: React.FC = () => {
 
             <div className="flex flex-wrap gap-3 justify-center">
               <button
-                className="gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all"
+                className="cursor-pointer gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all"
                 type="button"
                 onClick={restart}
               >
