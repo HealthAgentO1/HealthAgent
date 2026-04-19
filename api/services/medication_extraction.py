@@ -24,6 +24,14 @@ def extract_medications_with_rxnorm(free_text: str) -> list[dict[str, Any]]:
         name = item.get("name")
         if not isinstance(name, str) or not name.strip():
             continue
+        common = item.get("common_name")
+        scientific = item.get("scientific_name")
+        common_s = common.strip() if isinstance(common, str) else None
+        scientific_s = scientific.strip() if isinstance(scientific, str) else None
+        if common_s == "":
+            common_s = None
+        if scientific_s == "":
+            scientific_s = None
 
         from_llm = item.get("rxnorm_id")
         if from_llm is not None and not isinstance(from_llm, str):
@@ -36,6 +44,8 @@ def extract_medications_with_rxnorm(free_text: str) -> list[dict[str, Any]]:
         seen.add(dedupe_key)
 
         entry: dict[str, Any] = {
+            "common_name": common_s,
+            "scientific_name": scientific_s,
             "name": name.strip(),
             "rxnorm_id": rx_id,
         }

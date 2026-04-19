@@ -33,6 +33,15 @@ def _strip_json_fence(raw: str) -> str:
     return text.strip()
 
 
+def _optional_med_str(val: Any) -> str | None:
+    if val is None:
+        return None
+    if isinstance(val, (str, int, float)):
+        s = str(val).strip()
+        return s if s else None
+    return None
+
+
 def parse_medication_llm_json(raw: str) -> list[dict[str, Any]]:
     text = _strip_json_fence(raw)
     data = json.loads(text)
@@ -46,8 +55,17 @@ def parse_medication_llm_json(raw: str) -> list[dict[str, Any]]:
     for m in meds:
         if not isinstance(m, dict):
             continue
-        name = m.get("name")
-        if not isinstance(name, str) or not name.strip():
+        common = _optional_med_str(m.get("common_name"))
+        scientific = _optional_med_str(m.get("scientific_name"))
+        # Backward compatibility if the model returns legacy {"name": "..."} only.
+        legacy = _optional_med_str(m.get("name"))
+        if common and scientific and common.lower() == scientific.lower():
+            common = None
+        if not common and not scientific and not legacy:
+            continue
+        # Prefer INN/scientific for RxNorm lookup, then brand/common, then legacy `name`.
+        lookup = scientific or common or legacy
+        if not lookup:
             continue
         rid = m.get("rxnorm_id")
         rxnorm_id: str | None
@@ -58,7 +76,14 @@ def parse_medication_llm_json(raw: str) -> list[dict[str, Any]]:
             rxnorm_id = s if s else None
         else:
             rxnorm_id = None
-        out.append({"name": name.strip(), "rxnorm_id": rxnorm_id})
+        out.append(
+            {
+                "common_name": common,
+                "scientific_name": scientific,
+                "name": lookup.strip(),
+                "rxnorm_id": rxnorm_id,
+            }
+        )
 
     return out
 
@@ -103,7 +128,8 @@ def _complete_openai_compatible(system_prompt: str, user_text: str) -> str:
 def extract_medication_names_via_llm(free_text: str) -> list[dict[str, Any]]:
     """
     Ask the LLM (DeepSeek via OpenAI-compatible API by default) for structured medications.
-    Each item: {"name": str, "rxnorm_id": str | None}.
+    Each item: {"common_name": str | None, "scientific_name": str | None, "name": str, "rxnorm_id": str | None}.
+    `name` is a lookup/display fallback (scientific, else common, else legacy).
     """
     raw = (free_text or "").strip()
     if not raw:

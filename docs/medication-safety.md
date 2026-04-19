@@ -2,7 +2,7 @@
 
 **Status:** Draft  
 **Author:** Carl Gombert  
-**Last updated:** 2025
+**Last updated:** 2026
 
 ---
 
@@ -26,11 +26,23 @@ Patients managing multiple medications often have no easy way to check for dange
 
 ---
 
-## Agent Workflow
+## Current UI (active regimen)
+
+The **Medication Safety** page (`/medication-safety`, authenticated) supports:
+
+1. **Add prescription** — User enters free text describing what they take. The app calls **`POST /api/medication-profile/extract/`** with `medications_text`. The backend uses the DeepSeek-compatible LLM (`api/prompts/medication_extract_system.txt`) plus RxNorm resolution (`api/services/medication_extraction.py`) and returns structured medications. The client guides the user through optional regimen fields: **dosage (mg)**, **frequency**, **time to take**, and **refill** (how long before a refill is needed). Any field left blank is shown as **`-`** on the regimen list.
+2. **Persistence** — Regimen rows (name, optional fields, RxNorm id when known) are saved in the browser under **`localStorage` key `healthagent_active_regimen_v1`** (`frontend/src/medicationSafety/medicationRegimenStorage.ts`). Reloading the page keeps the list; clearing site data removes it. Each extract request still creates a **`MedicationProfile`** row on the server for auditing.
+3. **Detail** — `/medication-safety/med/:medicationId` allows editing the same optional fields and **removing** the drug after an in-app confirmation step.
+
+**API errors:** The extract endpoint returns **`{ "error": "..." }`** for LLM failures (typically HTTP **502**), configuration issues (**503**), or bad input (**400**). The UI surfaces these messages to the user.
+
+---
+
+## Agent Workflow (target)
 
 ```
 User inputs medication list (free text or structured)
-    → Lexigram: NLP extraction → normalized drug names
+    → DeepSeek (LLM) + RxNorm: NLP extraction → normalized drug names
     → openFDA: interaction check, side effect lookup
     → openFDA recalls: check for active recalls on any drug
     → Risk scoring: classify severity (critical / moderate / low)
@@ -51,9 +63,15 @@ User inputs medication list (free text or structured)
 
 ## External APIs
 
-### Lexigram
+### LLM extraction (implemented)
+
+- **Implementation:** OpenAI-compatible API (DeepSeek by default), server-side in `api/services/medication_llm_service.py` and `api/services/medication_extraction.py`; prompt `api/prompts/medication_extract_system.txt`.
+- **Returns:** JSON with `medications: [{ common_name, scientific_name, rxnorm_id }]` (and a consolidated `name` field on the API response for lookup/backward compatibility), then RxNav enrichment when the model does not supply an RxCUI.
+
+### Lexigram (roadmap / alternate)
+
 - Docs: https://docs.lexigram.io/
-- Used for: extracting structured drug mentions from free text
+- Used for: extracting structured drug mentions from free text (not wired in the current codebase)
 - Returns: normalized drug names, RxNorm codes
 - Auth: API key
 

@@ -16,7 +16,7 @@ flowchart TD
 
     A1 & A2 & A3 --> B1["Booking + pre-visit report\nMock or real integration, PDF/structured output"]
 
-    S2 --> B2["Lexigram\nNLP extraction"]
+    S2 --> B2["DeepSeek + RxNorm\nNLP extraction"]
     S2 --> B3["openFDA\nInteractions, recalls"]
     S2 --> B4["Alerts\nProvider / pharmacy"]
 
@@ -57,3 +57,14 @@ The **`/symptom-check`** React page mirrors survey state to **`localStorage`** u
 - **In-flight LLM calls:** If the user leaves while `requestFollowUpQuestions` or `requestConditionAssessment` is pending, the snapshot records which phase was active. Choosing **Resume** re-sends the same API request with the saved intake or follow-up payload; this mirrors server-side stateless survey turns (`POST /api/symptom/survey-llm/`) and does not duplicate server session state.
 
 - **Scope:** Persistence is **browser-local only** (not synced across devices or accounts). Clearing site data or using another browser profile starts fresh.
+
+## Medication Safety UI and extraction API
+
+The **Medication Safety** area (`/medication-safety`) lets signed-in users build an **active regimen** from free text. The flow is implemented in React (`frontend/src/pages/MedicationSafetyPage.tsx`, add-prescription UI in `frontend/src/medicationSafety/AddPrescriptionModal.tsx`) and uses the same **`apiClient`** + JWT pattern as the rest of the app.
+
+- **Extraction:** On “Identify medication”, the client `POST`s to **`/api/medication-profile/extract/`** (`MedicationProfileExtractView` in `api/views_medication.py`) with `{ medications_text: "<user text>" }`. Django runs **`extract_medications_with_rxnorm`** (`api/services/medication_extraction.py`): the LLM prompt is `api/prompts/medication_extract_system.txt` (JSON object with a `medications` array of `{ common_name, scientific_name, rxnorm_id }`, plus legacy `name` still accepted by the parser). RxNorm lookup prefers **scientific** over **common** names, then RxNav. The server persists a **`MedicationProfile`** row per request and returns `extracted_medications` in the JSON response. The UI shows **common** (brand/familiar) large and **scientific** (generic/INN) smaller when both differ; if only one is returned, a **single** title line is shown. The UI uses the first extracted drug for the add flow (if several are returned, an informational notice lists the others). Errors from the LLM layer surface as **502** with `{ "error": "..." }`; missing server keys as **503**; empty input as **400**.
+- **Regimen details:** After extraction, the user can submit optional fields (dosage in mg, frequency, time to take, refill horizon). Empty optional fields render as **`-`** on the list.
+- **Persistence:** The active regimen (including optional fields and a client-generated id for routing) is stored in **`localStorage`** under `healthagent_active_regimen_v1` (`frontend/src/medicationSafety/medicationRegimenStorage.ts`) so the list survives refresh in the same browser; it is not synced to the server or other devices. Each successful extract call still creates a **`MedicationProfile`** record for audit/backend use.
+- **Detail and removal:** `/medication-safety/med/:medicationId` (`MedicationSafetyDetailPage.tsx`) loads one entry from the same storage for edit; **Remove** opens an in-app confirmation dialog before deleting locally.
+
+The right-hand **interaction** and **safer alternatives** panels keep the prior layout with placeholder messaging until interaction checking is wired up.
