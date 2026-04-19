@@ -1,0 +1,19 @@
+{
+  "provider_references": [
+    {
+      "provider_group_id": 1,
+      "provider_groups": [{ "npi": [1831634989] }]
+    }
+  ],
+  "in_network": [
+    {
+      "billing_code": "99213",
+      "negotiated_rates": [
+        {
+          "negotiated_prices": [],
+          "provider_references": [1]
+        }
+      ]
+    }
+  ]
+}

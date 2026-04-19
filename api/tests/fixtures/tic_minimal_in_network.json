@@ -1,0 +1,21 @@
+{
+  "reporting_entity_name": "Fixture Payer",
+  "provider_references": [
+    { "provider_group_id": 0, "npi": [1000000004] },
+    { "provider_group_id": 1, "npi": ["2000000007"] }
+  ],
+  "in_network": [
+    {
+      "billing_code": "99213",
+      "negotiated_rates": [
+        {
+          "negotiated_prices": [],
+          "provider_references": [
+            { "provider_group_id": 0 },
+            { "npi": [3000000005] }
+          ]
+        }
+      ]
+    }
+  ]
+}

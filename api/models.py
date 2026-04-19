@@ -57,6 +57,61 @@ class SymptomSession(models.Model):
         return f"SymptomSession({self.pk}) for {self.user_id}"
 
 
+class InsurerNetworkNpi(models.Model):
+    """
+    Offline-ingested US payer transparency (CMS TIC) projection: organizational NPIs
+    observed in-network for a coarse insurer bucket (see `tic_us_manifest.json` slugs).
+    """
+
+    insurer_slug = models.CharField(max_length=32, db_index=True)
+    npi = models.CharField(max_length=10, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("insurer_slug", "npi"),
+                name="api_insurernetworknpi_insurer_npi_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.insurer_slug}:{self.npi}"
+
+
+class TicSourceFile(models.Model):
+    """Tracks processed TIC JSON files (dedupe / audit)."""
+
+    insurer_slug = models.CharField(max_length=32, db_index=True)
+    file_url = models.TextField()
+    sha256_hex = models.CharField(max_length=64, db_index=True)
+    npi_count = models.PositiveIntegerField(default=0)
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=("insurer_slug", "file_url", "sha256_hex"),
+                name="api_ticsourcefile_insurer_url_hash_uniq",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"TicSourceFile({self.insurer_slug}, {self.sha256_hex[:12]}…)"
+
+
+class NetworkDatasetVersion(models.Model):
+    """Append-only record for each full ingest (supports dump deploy provenance)."""
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    git_commit = models.CharField(max_length=64, blank=True)
+    notes = models.TextField(blank=True)
+    counts_by_insurer = models.JSONField(default=dict)
+
+    def __str__(self) -> str:
+        return f"NetworkDatasetVersion({self.pk} @ {self.created_at})"
+
+
 class MedicationProfile(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

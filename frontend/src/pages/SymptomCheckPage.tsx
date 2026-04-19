@@ -11,26 +11,37 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { fetchSymptomSessionResume } from "../api/queries";
 import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
-import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
+import type {
+  FollowUpAnswer,
+  FollowUpQuestion,
+  PriceEstimatePayload,
+  SymptomResultsPayload,
+} from "../symptomCheck/types";
 import { validateUserAddress, type UserAddress } from "../symptomCheck/addressValidation";
 import {
   buildGoogleMapsUrl,
   requestNearbyFacilities,
   type NearbyFacility,
+  type SymptomInsurerSlug,
 } from "../symptomCheck/nppesFacilitiesClient";
+import { priceEstimateCacheFingerprint } from "../symptomCheck/priceEstimateCache";
+import { PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS } from "../symptomCheck/priceEstimateStaticDisclaimer";
 import { parseJsonObjectFromLlm } from "../symptomCheck/parseLlmJson";
 import { US_STATE_OPTIONS, type UsStateCode } from "../symptomCheck/usStates";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
+  requestPriceEstimate,
   requestSecondFollowUpQuestions,
   type StructuredFollowUpAnswer,
 } from "../symptomCheck/symptomLlmClient";
 import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
 import {
   validateFollowUpQuestionsPayload,
+  validatePriceEstimatePayload,
   validateSymptomResultsPayload,
 } from "../symptomCheck/validatePayloads";
+import { InsuranceCompanyLogo } from "../symptomCheck/InsuranceCompanyLogos";
 import {
   SYMPTOM_CHECK_SESSION_VERSION,
   clearSymptomCheckSession,
@@ -43,10 +54,14 @@ import {
 } from "../symptomCheck/symptomCheckSession";
 
 const INSURANCE_OPTIONS = [
-  { id: "united", label: "United Healthcare" },
-  { id: "elevance", label: "Elevance" },
-  { id: "aetna", label: "Aetna" },
-  { id: "centene", label: "Centene" },
+  { id: "centene", label: "Centene / Ambetter" },
+  { id: "cigna", label: "Cigna" },
+  { id: "healthnet", label: "Health Net" },
+  { id: "fidelis", label: "Fidelis Care" },
+  { id: "unitedhealthcare", label: "UnitedHealthcare" },
+  { id: "elevance", label: "Elevance Health (Anthem)" },
+  { id: "humana", label: "Humana" },
+  { id: "other", label: "Other / not listed" },
 ] as const;
 
 type InsuranceId = (typeof INSURANCE_OPTIONS)[number]["id"];
@@ -68,13 +83,27 @@ function insuranceLabel(id: InsuranceId): string {
 /** Ensures persisted insurer ids still match the current option list. */
 function normalizeInsuranceId(id: string): InsuranceId | "" {
   if (id === "") return "";
-  const found = INSURANCE_OPTIONS.find((o) => o.id === id);
+  const legacy: Record<string, InsuranceId> = { wellcare: "elevance" };
+  const mapped = legacy[id] ?? id;
+  const found = INSURANCE_OPTIONS.find((o) => o.id === mapped);
   return found ? found.id : "";
 }
 
 /** Illustrative cost copy is not tied to specific facilities until billing integration lands. */
 function buildGenericCostNarrative(insurerLabel: string): string {
   return `Based on publicly posted in-network prices for ${insurerLabel}, negotiated amounts vary widely by facility, procedure code, and plan design. This is not your personal cost; your deductible and coinsurance can change what you pay.\n\nFacility-specific price examples are not shown in this preview.`;
+}
+
+/** When the LLM is unavailable, show the legacy narrative in the same layout as a structured estimate. */
+function defaultPriceEstimateFallback(insurerLabel: string): PriceEstimatePayload {
+  const parts = buildGenericCostNarrative(insurerLabel)
+    .split("\n\n")
+    .map((p) => p.trim())
+    .filter(Boolean);
+  return {
+    cost_range_label: "Varies widely (illustrative)",
+    cost_range_explanation: parts.join(" "),
+  };
 }
 
 /** Buckets Django `relevance_score` (NPI registry heuristics; public reviews are not available there). */
@@ -84,10 +113,44 @@ function facilityListingFitLabel(score: number): string {
   return "Weaker directory signals — confirm before visiting";
 }
 
+/** Coarse TIC file match — not eligibility. */
+function facilityNetworkBadge(h: NearbyFacility): { label: string; className: string } {
+  if (h.in_network === true) {
+    return {
+      label: "Likely in-network (file match)",
+      className:
+        "inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-emerald-800/25 bg-emerald-500/12 text-emerald-950",
+    };
+  }
+  if (h.in_network === false) {
+    return {
+      label: "Not listed in posted directory",
+      className:
+        "inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/40 bg-surface-container-low text-on-surface-variant",
+    };
+  }
+  return {
+    label: "Directory match n/a",
+    className:
+      "inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/25 bg-surface-container-lowest text-on-surface-variant",
+  };
+}
+
 /** Map insurer label from LLM payloads / resume API back to a known option id when possible. */
 function insuranceIdFromLabel(label: string): InsuranceId | "" {
   const t = label.trim().toLowerCase();
   if (!t) return "";
+  const legacy: Record<string, InsuranceId> = {
+    "united healthcare": "unitedhealthcare",
+    unitedhealthcare: "unitedhealthcare",
+    uhc: "unitedhealthcare",
+    elevance: "elevance",
+    anthem: "elevance",
+    aetna: "other",
+    "aetna cvs": "other",
+    wellcare: "elevance",
+  };
+  if (legacy[t]) return legacy[t];
   for (const o of INSURANCE_OPTIONS) {
     if (o.label.toLowerCase() === t) return o.id;
   }
@@ -207,6 +270,13 @@ const SymptomCheckPage: React.FC = () => {
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [nearbyTaxonomyUsed, setNearbyTaxonomyUsed] = useState<string | null>(null);
+  /** Illustrative cost from `price_estimate_context` LLM turn; null uses `defaultPriceEstimateFallback`. */
+  const [priceEstimate, setPriceEstimate] = useState<PriceEstimatePayload | null>(null);
+  /** When this matches `priceEstimateCacheFingerprint(session, results)`, we skip refetching the price LLM. */
+  const [priceEstimateCacheFingerprintState, setPriceEstimateCacheFingerprintState] = useState<
+    string | null
+  >(null);
+  const [priceEstimateLoading, setPriceEstimateLoading] = useState(false);
   /** Fades results content in after the LLM response lands. */
   const [resultsEntered, setResultsEntered] = useState(false);
   /** Tracks in-flight LLM phases for UI disable + session resume (see `symptomCheckSession`). */
@@ -235,6 +305,7 @@ const SymptomCheckPage: React.FC = () => {
   const followUpProgress = useSimulatedProgress(followUpLoading);
   const resultsProgress = useSimulatedProgress(resultsLoading);
   const roundTwoRequestProgress = useSimulatedProgress(pendingRequest === "followup_round_2");
+  const priceEstimateProgress = useSimulatedProgress(priceEstimateLoading);
 
   /**
    * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
@@ -261,6 +332,8 @@ const SymptomCheckPage: React.FC = () => {
     setUrlSessionHydrating(true);
     setLlmError(null);
     setResumeChatNotice(false);
+    setPriceEstimate(null);
+    setPriceEstimateCacheFingerprintState(null);
 
     void (async () => {
       try {
@@ -270,7 +343,8 @@ const SymptomCheckPage: React.FC = () => {
 
         setSurveyBackendSessionId(sid);
         setSymptoms(data.symptoms ?? "");
-        setInsurance(insuranceIdFromLabel(data.insurance_label ?? ""));
+        const resumedSlug = insuranceIdFromLabel(data.insurance_label ?? "");
+        setInsurance(resumedSlug);
         setPendingRequest(null);
         setResultsEntered(false);
 
@@ -297,8 +371,25 @@ const SymptomCheckPage: React.FC = () => {
             const resPayload = validateSymptomResultsPayload(parsed);
             setFollowUpQuestions([]);
             setFollowUpAnswers({});
-            setResults(resPayload);
+            setResults({
+              ...resPayload,
+              ...(resumedSlug ? { intake_insurer_slug: resumedSlug } : {}),
+            });
             setStep("results");
+            if (data.price_estimate_raw_text) {
+              try {
+                const priceParsed = parseJsonObjectFromLlm(data.price_estimate_raw_text);
+                const pe = validatePriceEstimatePayload(priceParsed);
+                setPriceEstimate(pe);
+                setPriceEstimateCacheFingerprintState(priceEstimateCacheFingerprint(sid, resPayload));
+              } catch {
+                setPriceEstimate(null);
+                setPriceEstimateCacheFingerprintState(null);
+              }
+            } else {
+              setPriceEstimate(null);
+              setPriceEstimateCacheFingerprintState(null);
+            }
           } catch {
             setLlmError("Could not restore results from this session.");
             setStep("intake");
@@ -361,6 +452,29 @@ const SymptomCheckPage: React.FC = () => {
     [insurance],
   );
 
+  /** Show likely in-network matches first when Django supplies booleans; preserve API order within each band. */
+  const displayedNearbyFacilities = useMemo(() => {
+    if (!nearbyFacilities || nearbyFacilities.length === 0) return [];
+    const rank = (h: NearbyFacility): number => {
+      if (h.in_network === true) return 0;
+      if (h.in_network === false) return 1;
+      return 2;
+    };
+    return [...nearbyFacilities]
+      .map((h, i) => ({ h, i }))
+      .sort((a, b) => {
+        const d = rank(a.h) - rank(b.h);
+        if (d !== 0) return d;
+        return a.i - b.i;
+      })
+      .map(({ h }) => h);
+  }, [nearbyFacilities]);
+
+  const effectivePriceEstimate = useMemo(
+    () => priceEstimate ?? defaultPriceEstimateFallback(insurerLabel),
+    [priceEstimate, insurerLabel],
+  );
+
   /** First LLM call (intake → follow-up questions). Params allow resume without relying on async state. */
   const runFollowUpRequest = async (input: { symptoms: string; insuranceLabel: string }) => {
     setLlmError(null);
@@ -394,6 +508,8 @@ const SymptomCheckPage: React.FC = () => {
     questionsRound2?: FollowUpQuestion[];
     answersRound2?: Record<string, FollowUpAnswer>;
     backendSessionId: string | null;
+    /** Step-1 payer id for NPPES network hints (copied onto `results` so nearby fetch cannot miss it). */
+    intakeInsurerSlug: InsuranceId | "";
   }) => {
     const q2 = input.questionsRound2 ?? [];
     const a2 = input.answersRound2 ?? {};
@@ -426,7 +542,10 @@ const SymptomCheckPage: React.FC = () => {
         followUpAnswers: structured,
         sessionId: input.backendSessionId,
       });
-      setResults(payload);
+      setResults({
+        ...payload,
+        ...(input.intakeInsurerSlug ? { intake_insurer_slug: input.intakeInsurerSlug } : {}),
+      });
       setStep("results");
       void queryClient.invalidateQueries({ queryKey: ["symptom-sessions"] });
     } catch (err) {
@@ -464,6 +583,7 @@ const SymptomCheckPage: React.FC = () => {
           questionsRound1: followUpQuestions,
           answersRound1: followUpAnswers,
           backendSessionId: surveyBackendSessionId,
+          intakeInsurerSlug: insurance,
         });
       } else {
         setSecondFollowUpQuestions(data.questions);
@@ -499,6 +619,7 @@ const SymptomCheckPage: React.FC = () => {
       questionsRound2: secondFollowUpQuestions,
       answersRound2: secondFollowUpAnswers,
       backendSessionId: surveyBackendSessionId,
+      intakeInsurerSlug: insurance,
     });
   };
 
@@ -531,6 +652,8 @@ const SymptomCheckPage: React.FC = () => {
       pendingRequest,
       llmError,
       surveyBackendSessionId,
+      priceEstimate,
+      priceEstimateCacheFingerprint: priceEstimateCacheFingerprintState,
     };
     writeSymptomCheckSession(snapshot);
   }, [
@@ -547,6 +670,8 @@ const SymptomCheckPage: React.FC = () => {
     pendingRequest,
     llmError,
     surveyBackendSessionId,
+    priceEstimate,
+    priceEstimateCacheFingerprintState,
   ]);
 
   /** After the LLM returns `care_taxonomy`, ask Django to rank NPPES facilities by road distance (via geocoding). */
@@ -578,6 +703,7 @@ const SymptomCheckPage: React.FC = () => {
 
     const run = async () => {
       try {
+        const slugRaw = (results.intake_insurer_slug ?? "").trim() || insurance;
         const payload = await requestNearbyFacilities({
           street: userAddress.street.trim(),
           city: userAddress.city.trim(),
@@ -585,6 +711,7 @@ const SymptomCheckPage: React.FC = () => {
           postal_code: userAddress.postalCode.trim(),
           taxonomy_codes: results.care_taxonomy.taxonomy_codes,
           suggested_care_setting: results.care_taxonomy.suggested_care_setting,
+          ...(slugRaw ? { insurer_slug: slugRaw as SymptomInsurerSlug } : {}),
         });
         if (cancelled) return;
         setNearbyFacilities(payload.facilities);
@@ -610,12 +737,86 @@ const SymptomCheckPage: React.FC = () => {
     userAddress.city,
     userAddress.state,
     userAddress.postalCode,
+    insurance,
+  ]);
+
+  /** After NPPES finishes (or is skipped), one DeepSeek turn for cost copy tied to conditions + top facility. */
+  useEffect(() => {
+    if (step !== "results") {
+      setPriceEstimate(null);
+      setPriceEstimateCacheFingerprintState(null);
+      setPriceEstimateLoading(false);
+      return;
+    }
+    if (!results || !surveyBackendSessionId || nearbyLoading) {
+      return;
+    }
+
+    const fp = priceEstimateCacheFingerprint(surveyBackendSessionId, results);
+    if (priceEstimateCacheFingerprintState === fp && priceEstimate !== null) {
+      setPriceEstimateLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPriceEstimateLoading(true);
+    setPriceEstimate(null);
+    setPriceEstimateCacheFingerprintState(null);
+
+    const top =
+      nearbyFacilities && nearbyFacilities.length > 0
+        ? {
+            npi: nearbyFacilities[0].npi,
+            name: nearbyFacilities[0].name,
+            address_line: nearbyFacilities[0].address_line,
+          }
+        : null;
+
+    void (async () => {
+      try {
+        const out = await requestPriceEstimate({
+          insuranceLabel: insurerLabel,
+          results,
+          topFacility: top,
+          sessionId: surveyBackendSessionId,
+        });
+        if (!cancelled) {
+          setPriceEstimate(out);
+          setPriceEstimateCacheFingerprintState(fp);
+        }
+      } catch {
+        if (!cancelled) {
+          setPriceEstimate(null);
+          setPriceEstimateCacheFingerprintState(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setPriceEstimateLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // `priceEstimate` is read inside the skip check but omitted from deps so clearing it for a
+    // refetch does not immediately rerun this effect and cancel the in-flight request.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- priceEstimate read for cache hit only
+  }, [
+    step,
+    results,
+    surveyBackendSessionId,
+    nearbyLoading,
+    nearbyFacilities,
+    insurerLabel,
+    priceEstimateCacheFingerprintState,
   ]);
 
   const applySnapshotToState = (snap: SymptomCheckSessionSnapshot) => {
+    const insId = normalizeInsuranceId(snap.insurance);
     setStep(snap.step);
     setSymptoms(snap.symptoms);
-    setInsurance(normalizeInsuranceId(snap.insurance));
+    setInsurance(insId);
     setUserAddress({
       street: snap.address.street,
       city: snap.address.city,
@@ -627,9 +828,18 @@ const SymptomCheckPage: React.FC = () => {
     setFollowUpAnswers(snap.followUpAnswers);
     setSecondFollowUpQuestions(snap.secondFollowUpQuestions);
     setSecondFollowUpAnswers(snap.secondFollowUpAnswers);
-    setResults(snap.results);
+    setResults(
+      snap.results
+        ? {
+            ...snap.results,
+            ...(insId ? { intake_insurer_slug: insId } : {}),
+          }
+        : null,
+    );
     setLlmError(snap.llmError);
     setSurveyBackendSessionId(snap.surveyBackendSessionId);
+    setPriceEstimate(snap.priceEstimate ?? null);
+    setPriceEstimateCacheFingerprintState(snap.priceEstimateCacheFingerprint ?? null);
     setPendingRequest(null);
     setIntakeSubstep("form");
   };
@@ -667,6 +877,7 @@ const SymptomCheckPage: React.FC = () => {
         questionsRound2: snap.secondFollowUpQuestions,
         answersRound2: snap.secondFollowUpAnswers,
         backendSessionId: snap.surveyBackendSessionId,
+        intakeInsurerSlug: ins,
       });
     }
   };
@@ -687,6 +898,9 @@ const SymptomCheckPage: React.FC = () => {
     setPendingRequest(null);
     setSurveyBackendSessionId(null);
     setResumeChatNotice(false);
+    setPriceEstimate(null);
+    setPriceEstimateCacheFingerprintState(null);
+    setPriceEstimateLoading(false);
     setSessionGate("ready");
     setIntakeSubstep("welcome");
   };
@@ -710,6 +924,9 @@ const SymptomCheckPage: React.FC = () => {
     setSurveyBackendSessionId(null);
     setResumeChatNotice(false);
     setResultsEntered(false);
+    setPriceEstimate(null);
+    setPriceEstimateCacheFingerprintState(null);
+    setPriceEstimateLoading(false);
     setIntakeSubstep("welcome");
   };
 
@@ -1365,9 +1582,12 @@ const SymptomCheckPage: React.FC = () => {
                           value={opt.id}
                           onChange={() => setInsurance(opt.id)}
                         />
-                        <span className="font-body text-sm text-on-surface font-medium">
-                          {opt.label}
-                        </span>
+                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                          <InsuranceCompanyLogo id={opt.id} />
+                          <span className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
+                            {opt.label}
+                          </span>
+                        </div>
                       </label>
                     );
                   })}
@@ -1849,6 +2069,21 @@ const SymptomCheckPage: React.FC = () => {
                 <strong className="text-on-surface">not</strong> in that registry—so farther
                 listings can rank higher when they look like established care sites.
               </p>
+              <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed">
+                In-network labels use publicly posted payer transparency files when we have them for
+                your selection—they are <strong className="text-on-surface">not</strong> eligibility
+                checks. We still list nearby options either way; likely in-network rows are shown
+                first when a directory match is available.
+              </p>
+              {insurance === "fidelis" ? (
+                <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed rounded-lg border border-outline-variant/20 bg-surface-container-low/40 px-3 py-2">
+                  <strong className="text-on-surface">Fidelis:</strong> posted in-network files list
+                  individual clinician NPIs, while this step shows <strong className="text-on-surface">
+                    hospital-style organization NPIs
+                  </strong>{" "}
+                  from the public directory—so we do not mark in- or out-of-network for that pairing.
+                </p>
+              ) : null}
               {nearbyTaxonomyUsed ? (
                 <p className="text-xs text-on-surface-variant font-body mb-4">
                   Directory search used NUCC taxonomy code{" "}
@@ -1873,83 +2108,95 @@ const SymptomCheckPage: React.FC = () => {
                 </p>
               ) : null}
 
-              {!nearbyLoading && !nearbyError && nearbyFacilities && nearbyFacilities.length > 0 ? (
+              {!nearbyLoading && !nearbyError && displayedNearbyFacilities.length > 0 ? (
                 <div className="space-y-4">
                   <ul className="space-y-4">
-                    {nearbyFacilities.slice(0, 3).map((h) => (
-                      <li
-                        key={h.npi}
-                        className="flex flex-col gap-3 bg-surface rounded-xl p-4 border border-outline-variant/15"
-                      >
-                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                          <div>
-                            <p className="font-headline font-bold text-on-surface">{h.name}</p>
-                            <p className="text-sm text-on-surface-variant font-body mt-1">
-                              {h.address_line}
-                            </p>
-                            <p className="text-xs text-on-surface-variant/85 font-body mt-1">
-                              {facilityListingFitLabel(h.relevance_score)}
-                            </p>
+                    {displayedNearbyFacilities.slice(0, 3).map((h) => {
+                      const nw = facilityNetworkBadge(h);
+                      return (
+                        <li
+                          key={h.npi}
+                          className="flex flex-col gap-3 bg-surface rounded-xl p-4 border border-outline-variant/15"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                            <div>
+                              <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                              <p className="text-sm text-on-surface-variant font-body mt-1">
+                                {h.address_line}
+                              </p>
+                              <p className="text-xs text-on-surface-variant/85 font-body mt-1">
+                                {facilityListingFitLabel(h.relevance_score)}
+                              </p>
+                              <p className="mt-2">
+                                <span className={nw.className}>{nw.label}</span>
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                              <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
+                                <span className="material-symbols-outlined text-base">near_me</span>
+                                {h.distance_label}
+                              </span>
+                              <a
+                                className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
+                                href={buildGoogleMapsUrl(h.address_line)}
+                                rel="noreferrer"
+                                target="_blank"
+                              >
+                                <span className="material-symbols-outlined text-base">map</span>
+                                Maps
+                              </a>
+                            </div>
                           </div>
-                          <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
-                            <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
-                              <span className="material-symbols-outlined text-base">near_me</span>
-                              {h.distance_label}
-                            </span>
-                            <a
-                              className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
-                              href={buildGoogleMapsUrl(h.address_line)}
-                              rel="noreferrer"
-                              target="_blank"
-                            >
-                              <span className="material-symbols-outlined text-base">map</span>
-                              Maps
-                            </a>
-                          </div>
-                        </div>
-                      </li>
-                    ))}
+                        </li>
+                      );
+                    })}
                   </ul>
 
-                  {nearbyFacilities.length > 3 ? (
+                  {displayedNearbyFacilities.length > 3 ? (
                     <details className="rounded-xl border border-outline-variant/15 bg-surface px-4 py-3">
                       <summary className="cursor-pointer text-sm font-semibold text-primary font-headline">
-                        Show more facilities ({nearbyFacilities.length - 3} more)
+                        Show more facilities ({displayedNearbyFacilities.length - 3} more)
                       </summary>
                       <ul className="mt-4 space-y-4">
-                        {nearbyFacilities.slice(3).map((h) => (
-                          <li
-                            key={h.npi}
-                            className="flex flex-col gap-3 border-t border-outline-variant/10 pt-4 first:border-t-0 first:pt-0"
-                          >
-                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                              <div>
-                                <p className="font-headline font-bold text-on-surface">{h.name}</p>
-                                <p className="text-sm text-on-surface-variant font-body mt-1">
-                                  {h.address_line}
-                                </p>
-                                <p className="text-xs text-on-surface-variant/85 font-body mt-1">
-                                  {facilityListingFitLabel(h.relevance_score)}
-                                </p>
+                        {displayedNearbyFacilities.slice(3).map((h) => {
+                          const nw = facilityNetworkBadge(h);
+                          return (
+                            <li
+                              key={h.npi}
+                              className="flex flex-col gap-3 border-t border-outline-variant/10 pt-4 first:border-t-0 first:pt-0"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                                <div>
+                                  <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                                  <p className="text-sm text-on-surface-variant font-body mt-1">
+                                    {h.address_line}
+                                  </p>
+                                  <p className="text-xs text-on-surface-variant/85 font-body mt-1">
+                                    {facilityListingFitLabel(h.relevance_score)}
+                                  </p>
+                                  <p className="mt-2">
+                                    <span className={nw.className}>{nw.label}</span>
+                                  </p>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                                  <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
+                                    <span className="material-symbols-outlined text-base">near_me</span>
+                                    {h.distance_label}
+                                  </span>
+                                  <a
+                                    className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
+                                    href={buildGoogleMapsUrl(h.address_line)}
+                                    rel="noreferrer"
+                                    target="_blank"
+                                  >
+                                    <span className="material-symbols-outlined text-base">map</span>
+                                    Maps
+                                  </a>
+                                </div>
                               </div>
-                              <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
-                                <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
-                                  <span className="material-symbols-outlined text-base">near_me</span>
-                                  {h.distance_label}
-                                </span>
-                                <a
-                                  className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
-                                  href={buildGoogleMapsUrl(h.address_line)}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  <span className="material-symbols-outlined text-base">map</span>
-                                  Maps
-                                </a>
-                              </div>
-                            </div>
-                          </li>
-                        ))}
+                            </li>
+                          );
+                        })}
                       </ul>
                     </details>
                   ) : null}
@@ -1964,22 +2211,41 @@ const SymptomCheckPage: React.FC = () => {
               </h2>
               <p className="text-sm text-on-surface-variant font-body mb-6">
                 Illustrative guidance for <strong className="text-on-surface">{insurerLabel}</strong>{" "}
-                — not tied to the facilities listed above until billing integration is enabled.
+                — not a personal quote; typical ranges are educational only.
               </p>
-              <article className="bg-surface rounded-xl p-5 border border-outline-variant/15">
-                {buildGenericCostNarrative(insurerLabel)
-                  .split("\n\n")
-                  .map((para, i) => (
-                    <p
-                      key={i}
-                      className={`text-sm text-on-surface font-body leading-relaxed ${
-                        i > 0 ? "mt-3 text-on-surface-variant" : ""
-                      }`}
-                    >
-                      {para}
+              {priceEstimateLoading ? (
+                <div className="bg-surface rounded-xl p-5 border border-outline-variant/15">
+                  <LinearLoadingBar
+                    label="Generating illustrative cost context"
+                    estimatedSeconds={25}
+                    progress={priceEstimateProgress}
+                  />
+                </div>
+              ) : (
+                <article className="bg-surface rounded-xl p-5 border border-outline-variant/15 space-y-4">
+                  <div className="rounded-lg border border-primary/20 bg-primary-fixed/8 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant font-headline mb-1">
+                      Illustrative range (not your bill)
                     </p>
-                  ))}
-              </article>
+                    <p className="text-xl sm:text-2xl font-headline font-bold text-primary tracking-tight">
+                      {effectivePriceEstimate.cost_range_label}
+                    </p>
+                  </div>
+                  <p className="text-sm text-on-surface font-body leading-relaxed">
+                    {effectivePriceEstimate.cost_range_explanation}
+                  </p>
+                  <div className="pt-2 border-t border-outline-variant/15 space-y-3">
+                    {PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS.map((para, i) => (
+                      <p
+                        key={`static-disclaimer-${i}`}
+                        className="text-sm text-on-surface-variant font-body leading-relaxed"
+                      >
+                        {para}
+                      </p>
+                    ))}
+                  </div>
+                </article>
+              )}
             </section>
 
             <div className="flex flex-wrap gap-3 justify-center">
