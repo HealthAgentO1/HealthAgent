@@ -55,6 +55,8 @@ jobs:
             DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
             OPENFDA_API_KEY=${{ secrets.OPENFDA_API_KEY }}
             DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+            ALLOW_ALL_CORS=True
+            FRONTEND_URL=https://health-guardian-frontend-875209953481.us-central1.run.app
           secrets: |
             POSTGRES_PASSWORD=DB_PASSWORD:latest
           flags: '--add-cloudsql-instances=${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db --allow-unauthenticated'

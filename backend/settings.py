@@ -66,7 +66,17 @@ MIDDLEWARE = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:8000",
 ]
+
+# Add production frontend URL from environment variable
+prod_frontend_url = os.environ.get("FRONTEND_URL")
+if prod_frontend_url:
+    CORS_ALLOWED_ORIGINS.append(prod_frontend_url)
+
+# Temporary: Allow all origins if in a specific "ALLOW_ALL_CORS" mode for troubleshooting
+if os.environ.get("ALLOW_ALL_CORS") == "True":
+    CORS_ALLOW_ALL_ORIGINS = True
 
 ROOT_URLCONF = 'backend.urls'
 
