@@ -66,8 +66,8 @@ import { InsuranceCompanyLogo } from '../symptomCheck/InsuranceCompanyLogos';
 import {
   SYMPTOM_CHECK_SESSION_VERSION,
   clearSymptomCheckSession,
-  isRecoverableSymptomCheckSession,
   readSymptomCheckSession,
+  shouldOfferSymptomCheckResume,
   writeSymptomCheckSession,
   type SymptomCheckFlowStep,
   type SymptomCheckPendingRequest,
@@ -372,7 +372,7 @@ const SymptomCheckPage: React.FC = () => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('session')?.trim()) return 'ready';
     const snap = readSymptomCheckSession();
-    if (snap && isRecoverableSymptomCheckSession(snap)) return 'need-choice';
+    if (snap && shouldOfferSymptomCheckResume(snap)) return 'need-choice';
     return 'ready';
   });
 

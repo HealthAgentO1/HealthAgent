@@ -6,6 +6,7 @@
  *
  * When the user leaves during an in-flight LLM request, `pendingRequest` records which
  * phase was active; the UI re-sends that request on "Resume" (see `SymptomCheckPage`).
+ * The resume prompt uses `shouldOfferSymptomCheckResume` (follow-up steps only).
  */
 import type {
   FollowUpQuestion,
@@ -104,7 +105,7 @@ function parseAddress(raw: unknown): UserAddressSnapshot | null {
 }
 
 /**
- * Returns true when a snapshot represents real progress worth offering "Resume"
+ * Returns true when a snapshot represents real progress worth mirroring to storage
  * (anything beyond a pristine empty intake).
  */
 export function isRecoverableSymptomCheckSession(s: SymptomCheckSessionSnapshot): boolean {
@@ -114,6 +115,17 @@ export function isRecoverableSymptomCheckSession(s: SymptomCheckSessionSnapshot)
   if (s.insurance !== "") return true;
   const a = s.address;
   if (a.street.trim() || a.city.trim() || a.state.trim() || a.postalCode.trim()) return true;
+  return false;
+}
+
+/**
+ * Whether to show the "Resume your symptom check?" gate on `/symptom-check`.
+ * Only follow-up rounds (not step 1 intake or step 3 results), including an in-flight
+ * LLM request for those phases after leaving mid-request.
+ */
+export function shouldOfferSymptomCheckResume(s: SymptomCheckSessionSnapshot): boolean {
+  if (s.step === "followup" || s.step === "followup_round_2") return true;
+  if (s.pendingRequest === "followup" || s.pendingRequest === "followup_round_2") return true;
   return false;
 }
 
