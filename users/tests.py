@@ -30,6 +30,7 @@ class AuthApiTests(APITestCase):
         self.assertEqual(res.data["email"], "me@example.com")
         self.assertEqual(res.data["first_name"], "Pat")
         self.assertIsNone(res.data.get("default_address"))
+        self.assertIsNone(res.data.get("default_insurance_slug"))
         patch = self.client.patch(
             self.me_url,
             {"first_name": "Pat", "last_name": "Lee", "date_of_birth": "1990-05-15"},
@@ -72,6 +73,45 @@ class AuthApiTests(APITestCase):
         self.assertIsNone(clear.data.get("default_address"))
         u.refresh_from_db()
         self.assertIsNone(u.default_address)
+
+    def test_me_patch_default_insurance_slug(self):
+        User.objects.create_user(email="ins@example.com", password="pass12345")
+        access = self.client.post(
+            self.token_url,
+            {"email": "ins@example.com", "password": "pass12345"},
+            format="json",
+        ).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        res = self.client.patch(
+            self.me_url,
+            {"default_insurance_slug": "aetna"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data.get("default_insurance_slug"), "aetna")
+        u = User.objects.get(email="ins@example.com")
+        self.assertEqual(u.default_insurance_slug, "aetna")
+
+        clear = self.client.patch(self.me_url, {"default_insurance_slug": None}, format="json")
+        self.assertEqual(clear.status_code, status.HTTP_200_OK)
+        self.assertIsNone(clear.data.get("default_insurance_slug"))
+        u.refresh_from_db()
+        self.assertIsNone(u.default_insurance_slug)
+
+    def test_me_rejects_invalid_insurance_slug(self):
+        User.objects.create_user(email="badins@example.com", password="pass12345")
+        access = self.client.post(
+            self.token_url,
+            {"email": "badins@example.com", "password": "pass12345"},
+            format="json",
+        ).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        res = self.client.patch(
+            self.me_url,
+            {"default_insurance_slug": "not_a_real_carrier"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_me_rejects_future_birthdate(self):
         User.objects.create_user(email="future@example.com", password="pass12345")

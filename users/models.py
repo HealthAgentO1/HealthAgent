@@ -28,6 +28,8 @@ class User(AbstractUser):
     date_of_birth = models.DateField(null=True, blank=True)
     # Symptom Check / settings: optional US practice address (same shape as client `UserAddress`).
     default_address = models.JSONField(null=True, blank=True)
+    # Symptom Check: coarse insurer bucket id (matches SPA `INSURANCE_OPTIONS` slug), optional.
+    default_insurance_slug = models.CharField(max_length=32, null=True, blank=True)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []

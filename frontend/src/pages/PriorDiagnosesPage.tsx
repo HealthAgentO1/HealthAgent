@@ -151,7 +151,7 @@ const PriorDiagnosesPage: React.FC = () => {
             ) : !rows?.length ? (
               <div className="rounded-lg border border-dashed border-outline-variant/45 bg-surface-container-low/60 px-4 py-8 text-center">
                 <span className="material-symbols-outlined mb-2 inline-block text-3xl text-on-surface-variant/60">
-                  prescription
+                  clinical_notes
                 </span>
                 <p className="font-body text-sm leading-relaxed text-on-surface-variant">
                   Nothing saved yet. Add a label above to use it as optional context on your next

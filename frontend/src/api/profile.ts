@@ -34,12 +34,27 @@ export function userAddressToDefaultPayload(addr: UserAddress): UserDefaultAddre
   };
 }
 
+/** Symptom Check insurer id; mirrors `User.default_insurance_slug` on the server. */
+export type SymptomInsuranceSlug =
+  | "centene"
+  | "cigna"
+  | "healthnet"
+  | "fidelis"
+  | "unitedhealthcare"
+  | "elevance"
+  | "humana"
+  | "bluecross"
+  | "aetna"
+  | "other";
+
 export type UserProfile = {
   email: string;
   first_name: string;
   last_name: string;
   date_of_birth: string | null;
   default_address: UserDefaultAddressPayload | null;
+  /** Saved Symptom Check insurer; null until the user completes intake at least once while signed in. */
+  default_insurance_slug?: SymptomInsuranceSlug | null;
 };
 
 export async function fetchUserProfile(): Promise<UserProfile> {
@@ -52,6 +67,7 @@ export async function updateUserProfile(payload: {
   last_name?: string;
   date_of_birth?: string | null;
   default_address?: UserDefaultAddressPayload | null;
+  default_insurance_slug?: SymptomInsuranceSlug | null;
 }): Promise<UserProfile> {
   const { data } = await apiClient.patch<UserProfile>("/auth/me/", payload);
   return data;

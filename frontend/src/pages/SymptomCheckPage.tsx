@@ -8,6 +8,8 @@
  * optionally attach past diagnosis labels (post-visit session records and **My prior diagnoses**)
  * to the first LLM call (`prior_official_diagnoses`).
  * Optional account default address (`GET/PATCH /auth/me/` `default_address`) prefills step 1 when empty.
+ * Signed-in users: `default_insurance_slug` on `/auth/me/` preselects insurer; first successful intake
+ * persists the choice; later visits show **Switch insurance provider** instead of the full grid.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -304,6 +306,14 @@ const SymptomCheckPage: React.FC = () => {
   );
   const [symptoms, setSymptoms] = useState('');
   const [insurance, setInsurance] = useState<InsuranceId | ''>('');
+  /**
+   * Server `default_insurance_slug` (normalized). When set while signed in, step 1 can show a
+   * compact “your insurance” card with **Switch insurance provider** instead of the full grid.
+   */
+  const [accountSavedInsuranceSlug, setAccountSavedInsuranceSlug] =
+    useState<InsuranceId | ''>('');
+  /** True: show full insurer grid (first visit, resume from snapshot, or user chose Switch). */
+  const [insurancePickerOpen, setInsurancePickerOpen] = useState(false);
   /** Step 1: practice location for NPPES distance ranking (mirrored to `symptomCheckSession`). */
   const [userAddress, setUserAddress] = useState<UserAddress>({
     street: '',
@@ -317,6 +327,8 @@ const SymptomCheckPage: React.FC = () => {
   const [addressAutofilledFromProfile, setAddressAutofilledFromProfile] = useState(false);
   /** After the user clears autofilled fields, avoid immediately re-applying the saved default from the API. */
   const suppressProfileAutofillRef = useRef(false);
+  /** Insurer id when **Switch insurance provider** opened — used to cancel back to the prior selection. */
+  const insuranceSwitchBaselineRef = useRef<InsuranceId | ''>('');
   const [saveDefaultAddrBusy, setSaveDefaultAddrBusy] = useState(false);
   const [saveDefaultAddrNotice, setSaveDefaultAddrNotice] = useState<
     { kind: 'success' } | { kind: 'error'; message: string } | null
@@ -466,6 +478,34 @@ const SymptomCheckPage: React.FC = () => {
     userAddress.postalCode,
   ]);
 
+  /** Load saved insurer from `GET /auth/me/` and prefill step 1 when empty (signed-in users). */
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setAccountSavedInsuranceSlug('');
+      return;
+    }
+    if (sessionGate !== 'ready') return;
+    if (urlSessionHydrating) return;
+    if (step !== 'intake') return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const p = await fetchUserProfile();
+        if (cancelled) return;
+        const slug = normalizeInsuranceId(p.default_insurance_slug ?? '');
+        setAccountSavedInsuranceSlug(slug);
+        setInsurance((prev) => (prev === '' && slug ? slug : prev));
+      } catch {
+        if (!cancelled) setAccountSavedInsuranceSlug('');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, sessionGate, step, urlSessionHydrating]);
+
   /** Deep link from dashboard: `?session=<uuid>` loads server state and skips the local resume modal. */
   useEffect(() => {
     const sid = searchParams.get('session')?.trim();
@@ -474,6 +514,7 @@ const SymptomCheckPage: React.FC = () => {
     let cancelled = false;
     setSessionGate('ready');
     setUrlSessionHydrating(true);
+    setInsurancePickerOpen(false);
     setUserAddress({ street: '', city: '', state: '', postalCode: '' });
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setLlmError(null);
@@ -511,10 +552,12 @@ const SymptomCheckPage: React.FC = () => {
             setSecondFollowUpAnswers({});
             setResults(null);
             setStep('followup');
+            setInsurancePickerOpen(false);
           } catch {
             setLlmError('Could not restore follow-up questions from this session.');
             setStep('intake');
             setIntakeSubstep('form');
+            setInsurancePickerOpen(true);
             setFollowUpQuestions([]);
             setFollowUpAnswers({});
           }
@@ -529,6 +572,7 @@ const SymptomCheckPage: React.FC = () => {
               ...(resumedSlug ? { intake_insurer_slug: resumedSlug } : {}),
             });
             setStep('results');
+            setInsurancePickerOpen(false);
             if (data.price_estimate_raw_text) {
               try {
                 const priceParsed = parseJsonObjectFromLlm(
@@ -551,6 +595,7 @@ const SymptomCheckPage: React.FC = () => {
             setLlmError('Could not restore results from this session.');
             setStep('intake');
             setIntakeSubstep('form');
+            setInsurancePickerOpen(true);
           }
         } else if (data.resume_step === 'chat') {
           setFollowUpQuestions([]);
@@ -558,6 +603,7 @@ const SymptomCheckPage: React.FC = () => {
           setResults(null);
           setStep('intake');
           setIntakeSubstep('form');
+          setInsurancePickerOpen(true);
           setResumeChatNotice(true);
         } else {
           setFollowUpQuestions([]);
@@ -565,6 +611,7 @@ const SymptomCheckPage: React.FC = () => {
           setResults(null);
           setStep('intake');
           setIntakeSubstep('form');
+          setInsurancePickerOpen(true);
         }
 
         setSearchParams(
@@ -584,6 +631,7 @@ const SymptomCheckPage: React.FC = () => {
           );
           setStep('intake');
           setIntakeSubstep('form');
+          setInsurancePickerOpen(true);
         }
       } finally {
         if (!cancelled) setUrlSessionHydrating(false);
@@ -608,6 +656,41 @@ const SymptomCheckPage: React.FC = () => {
     () => (insurance ? insuranceLabel(insurance) : ''),
     [insurance],
   );
+
+  const showCompactInsuranceCard = useMemo(() => {
+    if (!isAuthenticated) return false;
+    if (insurancePickerOpen) return false;
+    if (!accountSavedInsuranceSlug || !insurance) return false;
+    return accountSavedInsuranceSlug === insurance;
+  }, [
+    isAuthenticated,
+    insurancePickerOpen,
+    accountSavedInsuranceSlug,
+    insurance,
+  ]);
+
+  const openInsuranceSwitch = () => {
+    insuranceSwitchBaselineRef.current = insurance;
+    setInsurancePickerOpen(true);
+  };
+
+  const cancelInsuranceSwitch = () => {
+    setInsurance(insuranceSwitchBaselineRef.current);
+    setInsurancePickerOpen(false);
+  };
+
+  const confirmInsuranceSwitch = async () => {
+    if (!insurance) return;
+    if (isAuthenticated) {
+      try {
+        await updateUserProfile({ default_insurance_slug: insurance });
+        setAccountSavedInsuranceSlug(insurance);
+      } catch {
+        /* ignore */
+      }
+    }
+    setInsurancePickerOpen(false);
+  };
 
   /** Show likely in-network matches first when Django supplies booleans; preserve API order within each band. */
   const displayedNearbyFacilities = useMemo(() => {
@@ -637,7 +720,7 @@ const SymptomCheckPage: React.FC = () => {
     symptoms: string;
     insuranceLabel: string;
     priorOfficialDiagnoses?: string[];
-  }) => {
+  }): Promise<boolean> => {
     setLlmError(null);
     setPendingRequest('followup');
     try {
@@ -655,10 +738,12 @@ const SymptomCheckPage: React.FC = () => {
       setResults(null);
       setStep('followup');
       scrollAppToTop();
+      return true;
     } catch (err) {
       setLlmError(
         err instanceof Error ? err.message : 'Unable to load follow-up questions.',
       );
+      return false;
     } finally {
       setPendingRequest(null);
     }
@@ -778,11 +863,19 @@ const SymptomCheckPage: React.FC = () => {
       includePriorDiagnosesInLlm && priorOfficialDiagnosisLabels.length > 0
         ? priorOfficialDiagnosisLabels
         : undefined;
-    await runFollowUpRequest({
+    const ok = await runFollowUpRequest({
       symptoms: symptoms.trim(),
       insuranceLabel: insurerLabel,
       priorOfficialDiagnoses: prior,
     });
+    if (ok && isAuthenticated && insurance) {
+      try {
+        await updateUserProfile({ default_insurance_slug: insurance });
+        setAccountSavedInsuranceSlug(insurance);
+      } catch {
+        /* optional — insurer still used for this check */
+      }
+    }
   };
 
   /** Round 2 (if any) → condition assessment. */
@@ -1035,6 +1128,7 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimateCacheFingerprintState(snap.priceEstimateCacheFingerprint ?? null);
     setPendingRequest(null);
     setIntakeSubstep('form');
+    setInsurancePickerOpen(snap.step === 'intake');
   };
 
   const handleClearAddressFields = () => {
@@ -1152,6 +1246,7 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimate(null);
     setPriceEstimateCacheFingerprintState(null);
     setPriceEstimateLoading(false);
+    setInsurancePickerOpen(false);
     setSessionGate('ready');
     setIntakeSubstep('welcome');
   };
@@ -1183,6 +1278,7 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimate(null);
     setPriceEstimateCacheFingerprintState(null);
     setPriceEstimateLoading(false);
+    setInsurancePickerOpen(false);
     setIntakeSubstep('welcome');
   };
 
@@ -1983,44 +2079,93 @@ const SymptomCheckPage: React.FC = () => {
                 </div>
               </div>
 
-              <fieldset className="border-0 p-0 mx-0 mb-0">
-                <legend className="block text-sm font-semibold text-on-surface mb-3">
-                  Insurance provider
-                  <span className="text-error ml-1" aria-hidden>
-                    *
-                  </span>
-                </legend>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {INSURANCE_OPTIONS.map((opt) => {
-                    const selected = insurance === opt.id;
-                    return (
-                      <label
-                        key={opt.id}
-                        className={`flex items-center gap-3 cursor-pointer rounded-xl border px-4 py-3 transition-colors ${
-                          selected
-                            ? 'border-primary bg-primary-fixed/15 ring-1 ring-primary'
-                            : 'border-outline-variant/30 bg-surface hover:border-outline-variant/60'
-                        }`}
-                      >
-                        <input
-                          checked={selected}
-                          className="accent-primary w-4 h-4 shrink-0"
-                          name="insurance"
-                          type="radio"
-                          value={opt.id}
-                          onChange={() => setInsurance(opt.id)}
-                        />
-                        <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                          <InsuranceCompanyLogo id={opt.id} />
-                          <span className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
-                            {opt.label}
-                          </span>
-                        </div>
-                      </label>
-                    );
-                  })}
+              {showCompactInsuranceCard ? (
+                <div className="rounded-xl border border-secondary-fixed/30 bg-secondary-fixed/10 px-4 py-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-on-surface-variant">
+                    Your insurance
+                  </p>
+                  <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-3">
+                      {insurance ? <InsuranceCompanyLogo id={insurance} /> : null}
+                      <div className="min-w-0">
+                        <p className="font-headline text-base font-bold text-on-surface">
+                          {insurance ? insuranceLabel(insurance) : ''}
+                        </p>
+                        <p className="mt-1 font-body text-xs leading-relaxed text-on-surface-variant">
+                          Saved on your account. We use this for Symptom Check unless you switch.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 bg-surface px-4 py-2.5 font-headline text-xs font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
+                      onClick={openInsuranceSwitch}
+                    >
+                      Switch insurance provider
+                    </button>
+                  </div>
                 </div>
-              </fieldset>
+              ) : (
+                <div className="space-y-3">
+                  <fieldset className="mx-0 mb-0 border-0 p-0">
+                    <legend className="mb-3 block text-sm font-semibold text-on-surface">
+                      Insurance provider
+                      <span className="ml-1 text-error" aria-hidden>
+                        *
+                      </span>
+                    </legend>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {INSURANCE_OPTIONS.map((opt) => {
+                        const selected = insurance === opt.id;
+                        return (
+                          <label
+                            key={opt.id}
+                            className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                              selected
+                                ? 'border-primary bg-primary-fixed/15 ring-1 ring-primary'
+                                : 'border-outline-variant/30 bg-surface hover:border-outline-variant/60'
+                            }`}
+                          >
+                            <input
+                              checked={selected}
+                              className="accent-primary h-4 w-4 shrink-0"
+                              name="insurance"
+                              type="radio"
+                              value={opt.id}
+                              onChange={() => setInsurance(opt.id)}
+                            />
+                            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                              <InsuranceCompanyLogo id={opt.id} />
+                              <span className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
+                                {opt.label}
+                              </span>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                  {insurancePickerOpen && accountSavedInsuranceSlug ? (
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                      <button
+                        type="button"
+                        className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 px-5 py-2 font-headline text-sm font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
+                        onClick={cancelInsuranceSwitch}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="gradient-primary inline-flex cursor-pointer items-center justify-center rounded-lg px-5 py-2 font-headline text-sm font-semibold text-on-primary shadow-ambient transition-all hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] disabled:cursor-not-allowed disabled:opacity-40"
+                        disabled={!insurance}
+                        onClick={() => void confirmInsuranceSwitch()}
+                      >
+                        Save provider
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              )}
 
               <div className="pt-10 mt-2 border-t border-outline-variant/15">
                 {addressAutofilledFromProfile ? (
@@ -2114,8 +2259,9 @@ const SymptomCheckPage: React.FC = () => {
                 </button>
                 {!intakeValid && (
                   <p className="text-xs text-on-surface-variant font-body">
-                    Add symptoms, choose an insurer, and complete your address to
-                    continue.
+                    {showCompactInsuranceCard
+                      ? 'Add symptoms and a complete US address to continue.'
+                      : 'Add symptoms, choose an insurer, and complete your address to continue.'}
                   </p>
                 )}
               </div>

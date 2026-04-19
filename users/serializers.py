@@ -10,6 +10,35 @@ User = get_user_model()
 
 _ZIP_RE = re.compile(r"^\d{5}$")
 
+# Keep in sync with `INSURANCE_OPTIONS` ids in `frontend/src/pages/SymptomCheckPage.tsx`.
+SYMPTOM_CHECK_INSURANCE_SLUGS = frozenset(
+    {
+        "centene",
+        "cigna",
+        "healthnet",
+        "fidelis",
+        "unitedhealthcare",
+        "elevance",
+        "humana",
+        "bluecross",
+        "aetna",
+        "other",
+    }
+)
+
+
+def validate_symptom_insurance_slug(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise serializers.ValidationError("Must be a string or null.")
+    v = value.strip()
+    if not v:
+        return None
+    if v not in SYMPTOM_CHECK_INSURANCE_SLUGS:
+        raise serializers.ValidationError("Unknown insurance provider.")
+    return v
+
 
 class DefaultAddressSerializer(serializers.Serializer):
     """
@@ -49,14 +78,24 @@ class DefaultAddressSerializer(serializers.Serializer):
 
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    """Current user: name, optional birth date, optional default US address (JSON)."""
+    """Current user: name, optional birth date, optional default US address (JSON), optional default insurer."""
 
     email = serializers.EmailField(read_only=True)
     default_address = serializers.JSONField(required=False, allow_null=True)
+    default_insurance_slug = serializers.CharField(
+        max_length=32, required=False, allow_null=True, allow_blank=True
+    )
 
     class Meta:
         model = User
-        fields = ("email", "first_name", "last_name", "date_of_birth", "default_address")
+        fields = (
+            "email",
+            "first_name",
+            "last_name",
+            "date_of_birth",
+            "default_address",
+            "default_insurance_slug",
+        )
         extra_kwargs = {
             "first_name": {"required": False, "allow_blank": True},
             "last_name": {"required": False, "allow_blank": True},
@@ -78,6 +117,9 @@ class UserProfileSerializer(serializers.ModelSerializer):
         ser = DefaultAddressSerializer(data=value)
         ser.is_valid(raise_exception=True)
         return ser.validated_data
+
+    def validate_default_insurance_slug(self, value):
+        return validate_symptom_insurance_slug(value)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
