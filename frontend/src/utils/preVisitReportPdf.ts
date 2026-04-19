@@ -4,6 +4,8 @@ import type { PatientFriendlyPreVisit } from "./preVisitReportPatientView";
 const MARGIN = 18;
 const PAGE_BOTTOM_PAD = 16;
 
+const FONT_FAMILY = "Manrope";
+
 function capitalize(s: string): string {
   if (!s) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
@@ -20,13 +22,41 @@ function formatPdfDate(iso: string): string {
   }
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result as string);
-    r.onerror = reject;
-    r.readAsDataURL(blob);
-  });
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+async function embedManropeFonts(doc: jsPDF): Promise<boolean> {
+  const base = import.meta.env.BASE_URL || "/";
+  const pathPrefix = base.endsWith("/") ? `${base}fonts/` : `${base}/fonts/`;
+  const makeUrl = (file: string) =>
+    typeof window !== "undefined"
+      ? new URL(`${pathPrefix}${file}`, window.location.origin).href
+      : `${pathPrefix}${file}`;
+
+  try {
+    const [boldRes, regRes] = await Promise.all([
+      fetch(makeUrl("Manrope-Bold.ttf")),
+      fetch(makeUrl("Manrope-Regular.ttf")),
+    ]);
+    if (!boldRes.ok || !regRes.ok) return false;
+
+    const boldB64 = arrayBufferToBase64(await boldRes.arrayBuffer());
+    const regB64 = arrayBufferToBase64(await regRes.arrayBuffer());
+
+    doc.addFileToVFS("Manrope-Bold.ttf", boldB64);
+    doc.addFont("Manrope-Bold.ttf", FONT_FAMILY, "bold", "normal", "Identity-H");
+    doc.addFileToVFS("Manrope-Regular.ttf", regB64);
+    doc.addFont("Manrope-Regular.ttf", FONT_FAMILY, "normal", "normal", "Identity-H");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function pageHeight(doc: jsPDF): number {
@@ -64,6 +94,22 @@ function addWrapped(
   return cy;
 }
 
+function setBodyFont(doc: jsPDF, hasManrope: boolean): void {
+  if (hasManrope) {
+    doc.setFont(FONT_FAMILY, "normal");
+  } else {
+    doc.setFont("helvetica", "normal");
+  }
+}
+
+function setBoldFont(doc: jsPDF, hasManrope: boolean): void {
+  if (hasManrope) {
+    doc.setFont(FONT_FAMILY, "bold");
+  } else {
+    doc.setFont("helvetica", "bold");
+  }
+}
+
 export async function downloadPreVisitReportPdf(opts: {
   createdAtIso: string;
   sessionId: string;
@@ -76,10 +122,45 @@ export async function downloadPreVisitReportPdf(opts: {
   const textW = pw - 2 * MARGIN;
   const lineH = 5;
 
+  const hasManrope = await embedManropeFonts(doc);
+
   const base = import.meta.env.BASE_URL || "/";
   const logoPath = base.endsWith("/") ? `${base}logo.png` : `${base}/logo.png`;
   const logoUrl =
     typeof window !== "undefined" ? new URL(logoPath, window.location.origin).href : logoPath;
+
+  const drawBrandTopRight = (brandRight: number) => {
+    const subSize = 7.5;
+    setBodyFont(doc, hasManrope);
+    doc.setFontSize(subSize);
+    const clinicalW = doc.getTextWidth("Clinical Sanctuary");
+
+    setBoldFont(doc, hasManrope);
+    let titleSize = 10;
+    let bestDiff = Infinity;
+    for (let s = 8; s <= 26; s += 0.25) {
+      doc.setFontSize(s);
+      const w = doc.getTextWidth("HealthOS");
+      const diff = Math.abs(w - clinicalW);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        titleSize = s;
+      }
+    }
+    doc.setFontSize(titleSize);
+
+    const yTop = MARGIN + 4;
+    doc.setTextColor(0);
+    doc.text("HealthOS", brandRight, yTop, { align: "right" });
+
+    const ySub = yTop + Math.max(5.5, titleSize * 0.38);
+    setBodyFont(doc, hasManrope);
+    doc.setFontSize(subSize);
+    doc.setTextColor(55);
+    doc.text("Clinical Sanctuary", brandRight, ySub, { align: "right" });
+    doc.setTextColor(0);
+  };
+
   try {
     const res = await fetch(logoUrl);
     if (res.ok) {
@@ -90,23 +171,26 @@ export async function downloadPreVisitReportPdf(opts: {
       const maxW = 42;
       const w = imgW > maxW ? maxW : imgW;
       const h = imgW > maxW ? (props.height / props.width) * w : imgH;
-      doc.addImage(dataUrl, "PNG", pw - MARGIN - w, MARGIN, w, h);
+      const logoLeft = pw - MARGIN - w;
+      doc.addImage(dataUrl, "PNG", logoLeft, MARGIN, w, h);
+      drawBrandTopRight(logoLeft - 4);
+    } else {
+      drawBrandTopRight(pw - MARGIN);
     }
   } catch {
-    /* optional branding */
+    drawBrandTopRight(pw - MARGIN);
   }
 
   let y = MARGIN + 16;
-  doc.setTextColor(0);
-  doc.setFont("helvetica", "bold");
+  setBoldFont(doc, hasManrope);
   doc.setFontSize(17);
-  doc.text("Health Guardian", MARGIN, y);
+  doc.text("HealthOS", MARGIN, y);
   y += 7;
   doc.setFontSize(13);
+  setBodyFont(doc, hasManrope);
   doc.text("Pre-visit summary", MARGIN, y);
   y += 10;
 
-  doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.setTextColor(90);
   y = addWrapped(doc, y, `Generated: ${formatPdfDate(opts.createdAtIso)}`, textW, lineH, MARGIN);
@@ -114,6 +198,7 @@ export async function downloadPreVisitReportPdf(opts: {
   y += 3;
 
   doc.setFontSize(10);
+  setBodyFont(doc, hasManrope);
   const triage = opts.triageLevel ? capitalize(opts.triageLevel) : "Not set";
   y = addWrapped(doc, y, `Suggested urgency: ${triage}`, textW, lineH, MARGIN);
   y += 4;
@@ -122,7 +207,7 @@ export async function downloadPreVisitReportPdf(opts: {
     doc.setFont("helvetica", "italic");
     doc.setTextColor(55);
     y = addWrapped(doc, y, opts.patientView.triagePatientNote, textW, lineH, MARGIN);
-    doc.setFont("helvetica", "normal");
+    setBodyFont(doc, hasManrope);
     doc.setTextColor(0);
     y += 4;
   }
@@ -136,11 +221,11 @@ export async function downloadPreVisitReportPdf(opts: {
   } else {
     for (const sec of opts.patientView.sections) {
       y = ensureY(doc, y, lineH + 2);
-      doc.setFont("helvetica", "bold");
+      setBoldFont(doc, hasManrope);
       doc.setFontSize(11);
       doc.text(sec.heading, MARGIN, y);
       y += 6;
-      doc.setFont("helvetica", "normal");
+      setBodyFont(doc, hasManrope);
       doc.setFontSize(10);
       if (sec.body) {
         y = addWrapped(doc, y, sec.body, textW, lineH, MARGIN);
@@ -157,10 +242,20 @@ export async function downloadPreVisitReportPdf(opts: {
   y = ensureY(doc, y, lineH + 4);
   doc.setFontSize(8);
   doc.setTextColor(110);
+  setBodyFont(doc, hasManrope);
   const disclaimer =
     "For your records only. This document does not replace professional medical advice, diagnosis, or treatment. Discuss with a qualified clinician.";
   y = addWrapped(doc, y, disclaimer, textW, 4.2, MARGIN);
 
   const safeId = opts.sessionId.replace(/[^a-zA-Z0-9-]/g, "").slice(0, 12);
-  doc.save(`health-guardian-previsit-${safeId}.pdf`);
+  doc.save(`healthos-previsit-${safeId}.pdf`);
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = reject;
+    r.readAsDataURL(blob);
+  });
 }
