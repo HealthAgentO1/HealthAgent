@@ -175,7 +175,7 @@ const Sidebar: React.FC = () => {
               </p>
               <button
                 type="button"
-                className="mt-3 w-full rounded-lg py-2.5 text-left text-sm font-semibold text-primary hover:bg-surface-container-lowest/80"
+                className="mt-3 w-fit cursor-pointer rounded-lg px-0 py-2.5 text-left text-sm font-semibold text-primary hover:bg-surface-container-lowest/80"
                 onClick={handleSignOut}
               >
                 Sign out
@@ -264,7 +264,7 @@ const Sidebar: React.FC = () => {
           </p>
           <button
             type="button"
-            className="mt-2 w-full text-left text-sm font-semibold text-primary hover:underline"
+            className="mt-2 w-fit cursor-pointer text-left text-sm font-semibold text-primary hover:underline"
             onClick={handleSignOut}
           >
             Sign out
