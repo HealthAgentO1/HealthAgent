@@ -6,6 +6,8 @@
 frontend/.env
 frontend/.env.local
 frontend/.env.*.local
+gcp-key.json
+*.json-key
 
 # Python
 __pycache__/
@@ -29,3 +31,4 @@ db.sqlite3
 .DS_Store
 .idea/
 backend/__pycache__/settings.cpython-310.pyc
+scripts/gcp-key.json

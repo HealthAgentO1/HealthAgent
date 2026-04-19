@@ -32,7 +32,7 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-g6j5$k46w1$yyx
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["*"] # Be more restrictive in production with real domain
 
 
 # Application definition
@@ -53,6 +53,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -102,6 +103,12 @@ DATABASES = {
     }
 }
 
+# If running on Google Cloud Run, use the Cloud SQL Unix socket
+if os.environ.get("POSTGRES_HOST", "").startswith("/cloudsql/"):
+    DATABASES["default"]["HOST"] = os.environ.get("POSTGRES_HOST")
+    # For Unix sockets, PORT might not be used, but Django DB engine sometimes wants it empty or omitted
+    DATABASES["default"]["PORT"] = ""
+
 # Tests use SQLite so `manage.py test` does not require a running Postgres instance.
 if "test" in sys.argv:
     DATABASES["default"] = {
@@ -145,6 +152,10 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.2/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Enable WhiteNoise storage for compression and forever-cache headers
+STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field

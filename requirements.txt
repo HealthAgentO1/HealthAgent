@@ -8,3 +8,7 @@ openai==1.59.8
 anthropic==0.42.0
 tiktoken==0.8.0
 requests==2.31.0
+gunicorn==21.2.0
+whitenoise==6.5.0
+psycopg2-binary==2.9.6
+dj-database-url==2.1.0

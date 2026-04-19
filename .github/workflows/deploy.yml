@@ -1,0 +1,87 @@
+name: Deploy to Google Cloud Run
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  REGION: us-central1
+  BACKEND_SERVICE: health-guardian-backend
+  FRONTEND_SERVICE: health-guardian-frontend
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Google Auth
+        uses: 'google-github-actions/auth@v2'
+        with:
+          credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+      - name: 'Set up Cloud SDK'
+        uses: 'google-github-actions/setup-gcloud@v2'
+
+      - name: 'Docker Auth'
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev
+
+      # 1. Build and Push Backend
+      - name: Build and Push Backend
+        run: |
+          docker build -f Dockerfile.prod -t us-central1-docker.pkg.dev/$PROJECT_ID/health-guardian-repo/$BACKEND_SERVICE:${{ github.sha }} .
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/health-guardian-repo/$BACKEND_SERVICE:${{ github.sha }}
+
+      # 2. Deploy Backend first to get its URL
+      - name: Deploy Backend
+        id: deploy-backend
+        uses: 'google-github-actions/deploy-cloudrun@v2'
+        with:
+          service: ${{ env.BACKEND_SERVICE }}
+          region: ${{ env.REGION }}
+          image: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/health-guardian-repo/${{ env.BACKEND_SERVICE }}:${{ github.sha }}
+          env_vars: |
+            DJANGO_DEBUG=False
+            POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db
+            DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+            OPENFDA_API_KEY=${{ secrets.OPENFDA_API_KEY }}
+            DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }}
+          flags: '--add-cloudsql-instances=${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db --allow-unauthenticated'
+
+      # 3. Build and Push Frontend (inject backend URL)
+      - name: Build and Push Frontend
+        run: |
+          # Use the backend URL from the previous step
+          BACKEND_URL="${{ steps.deploy-backend.outputs.url }}"
+          cd frontend
+          docker build -f Dockerfile.prod --build-arg VITE_API_URL="${BACKEND_URL}/api" -t us-central1-docker.pkg.dev/$PROJECT_ID/health-guardian-repo/$FRONTEND_SERVICE:${{ github.sha }} .
+          docker push us-central1-docker.pkg.dev/$PROJECT_ID/health-guardian-repo/$FRONTEND_SERVICE:${{ github.sha }}
+
+      # 4. Deploy Frontend
+      - name: Deploy Frontend
+        uses: 'google-github-actions/deploy-cloudrun@v2'
+        with:
+          service: ${{ env.FRONTEND_SERVICE }}
+          region: ${{ env.REGION }}
+          image: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/health-guardian-repo/${{ env.FRONTEND_SERVICE }}:${{ github.sha }}
+          flags: '--allow-unauthenticated'
+
+      # Run Migrations
+      - name: Run Migrations
+        run: |
+          gcloud run jobs create migrate-job-${{ github.sha }} \
+            --image us-central1-docker.pkg.dev/$PROJECT_ID/health-guardian-repo/$BACKEND_SERVICE:${{ github.sha }} \
+            --command python \
+            --args manage.py,migrate \
+            --region ${{ env.REGION }} \
+            --set-env-vars DJANGO_DEBUG=False,POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
+            --set-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
+            --execute --wait
+          gcloud run jobs delete migrate-job-${{ github.sha }} --region ${{ env.REGION }} --quiet
