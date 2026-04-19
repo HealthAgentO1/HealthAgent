@@ -160,6 +160,16 @@ function severityStyles(level: string): string {
   return "bg-teal-500/12 text-teal-800 border border-teal-400/35";
 }
 
+/** App content scrolls inside `Layout`'s `<main>`; reset both so each flow step starts at the top. */
+function scrollAppToTop(): void {
+  const run = () => {
+    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  };
+  run();
+  requestAnimationFrame(run);
+}
+
 const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -352,6 +362,7 @@ const SymptomCheckPage: React.FC = () => {
       setSecondFollowUpAnswers({});
       setResults(null);
       setStep("followup");
+      scrollAppToTop();
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to load follow-up questions.");
     } finally {
@@ -385,8 +396,7 @@ const SymptomCheckPage: React.FC = () => {
       );
       return;
     }
-    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    scrollAppToTop();
     setLlmError(null);
     setPendingRequest("results");
     try {
@@ -420,6 +430,7 @@ const SymptomCheckPage: React.FC = () => {
       );
       return;
     }
+    scrollAppToTop();
     setLlmError(null);
     setPendingRequest("followup_round_2");
     try {
@@ -443,6 +454,7 @@ const SymptomCheckPage: React.FC = () => {
         setSecondFollowUpQuestions(data.questions);
         setSecondFollowUpAnswers(buildInitialAnswers(data.questions));
         setStep("followup_round_2");
+        scrollAppToTop();
       }
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to evaluate. Please try again.");
@@ -463,6 +475,7 @@ const SymptomCheckPage: React.FC = () => {
   /** Round 2 (if any) → condition assessment. */
   const handleSeeResults = async () => {
     if (!followUpValid || !secondFollowUpValid || pendingRequest) return;
+    scrollAppToTop();
     await runResultsRequest({
       symptoms: symptoms.trim(),
       insuranceLabel: insurerLabel,
@@ -476,8 +489,7 @@ const SymptomCheckPage: React.FC = () => {
 
   /** App content scrolls inside `Layout`’s `<main>`; reset both so each flow step starts at the top. */
   useEffect(() => {
-    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    scrollAppToTop();
   }, [step]);
 
   // Mirror flow state to localStorage whenever the user is past the resume gate.
