@@ -4,7 +4,6 @@ import GuestRoute from "./components/GuestRoute";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardPage from "./pages/DashboardPage";
 import SymptomCheckPage from "./pages/SymptomCheckPage";
-import CareMatchesPage from "./pages/CareMatchesPage";
 import MedicationSafetyPage from "./pages/MedicationSafetyPage";
 import MedicationSafetyDetailPage from "./pages/MedicationSafetyDetailPage";
 import ReportsPage from "./pages/ReportsPage";
@@ -24,7 +23,6 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/symptom-check" element={<SymptomCheckPage />} />
-          <Route path="/care-matches" element={<CareMatchesPage />} />
           <Route path="/medication-safety" element={<MedicationSafetyPage />} />
           <Route path="/medication-safety/med/:medicationId" element={<MedicationSafetyDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />

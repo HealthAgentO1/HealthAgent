@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { triageBadgeClasses } from "../utils/triageSeverityStyles";
 import { useDeleteSymptomSession, useSymptomSessions } from "../api/queries";
@@ -23,11 +23,69 @@ function triageLabel(level: string | null): string {
 const DashboardPage: React.FC = () => {
   const { data: sessions, isLoading, isError, error } = useSymptomSessions();
   const deleteSession = useDeleteSymptomSession();
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+
+  const confirmDeleteSession =
+    confirmDeleteSessionId && sessions
+      ? sessions.find((s) => s.session_id === confirmDeleteSessionId)
+      : undefined;
+
   return (
     <div className="p-6 md:p-10 lg:p-12">
+      {confirmDeleteSessionId ? (
+        <div
+          aria-labelledby="delete-session-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          role="dialog"
+        >
+          <div className="bg-surface-container-lowest rounded-xl shadow-xl max-w-md w-full p-6 md:p-8 border border-outline-variant/20">
+            <h2
+              className="text-xl font-headline font-bold text-primary mb-2"
+              id="delete-session-title"
+            >
+              Delete symptom check?
+            </h2>
+            <p className="text-sm text-on-surface-variant font-body mb-6">
+              {confirmDeleteSession ? (
+                <>
+                  The check from{" "}
+                  <span className="font-medium text-on-surface">
+                    {formatSessionTimestamp(confirmDeleteSession.created_at)}
+                  </span>{" "}
+                  will be removed from your history. You will not be able to recover it.
+                </>
+              ) : (
+                <>This symptom check will be removed. You will not be able to recover it.</>
+              )}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                className="cursor-pointer bg-error text-on-error px-6 py-3 rounded-lg font-headline font-semibold text-sm hover:bg-[#93000a] transition-colors sm:flex-1"
+                onClick={() => {
+                  const id = confirmDeleteSessionId;
+                  setConfirmDeleteSessionId(null);
+                  if (id) deleteSession.mutate(id);
+                }}
+                type="button"
+              >
+                Delete
+              </button>
+              <button
+                className="cursor-pointer px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
+                onClick={() => setConfirmDeleteSessionId(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="max-w-6xl mx-auto space-y-8">
         {/* Page Header */}
-        <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <header>
           <div>
             <h1 className="font-headline text-4xl md:text-[3.5rem] leading-none font-bold text-primary tracking-tight mb-2">
               HealthOS
@@ -35,12 +93,6 @@ const DashboardPage: React.FC = () => {
             <p className="font-body text-on-surface-variant text-base">
               Your clinical sanctuary for holistic well-being.
             </p>
-          </div>
-          <div className="flex items-center gap-3 bg-surface-container-lowest px-4 py-2 rounded-full shadow-ambient border-ghost">
-            <div className="w-2 h-2 rounded-full bg-secondary"></div>
-            <span className="font-body text-sm font-medium text-on-surface">
-              All systems optimal
-            </span>
           </div>
         </header>
 
@@ -277,20 +329,13 @@ const DashboardPage: React.FC = () => {
                         <div className="flex items-center shrink-0 border-l border-outline-variant/20 bg-surface-container-lowest group-hover:bg-surface-bright pl-1 pr-2 md:pr-3">
                           <button
                             type="button"
-                            className="flex h-10 w-10 items-center justify-center rounded-lg border border-error/40 bg-error/10 text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"
+                            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-error/40 bg-error/10 text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"
                             aria-label="Delete this symptom check"
                             disabled={deletingThis}
                             onClick={(e) => {
                               e.preventDefault();
                               e.stopPropagation();
-                              if (
-                                !window.confirm(
-                                  "Delete this symptom check? You will not be able to recover it.",
-                                )
-                              ) {
-                                return;
-                              }
-                              deleteSession.mutate(s.session_id);
+                              setConfirmDeleteSessionId(s.session_id);
                             }}
                           >
                             <span className="material-symbols-outlined text-[22px]" aria-hidden>

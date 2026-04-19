@@ -5,7 +5,6 @@ import { useAuth } from "../context/AuthContext";
 const navItems = [
   { to: "/", icon: "dashboard", label: "Dashboard" },
   { to: "/symptom-check", icon: "medical_services", label: "Symptom Check" },
-  { to: "/care-matches", icon: "person_search", label: "Care Matches" },
   {
     to: "/medication-safety",
     icon: "pill",
@@ -78,27 +77,8 @@ const Sidebar: React.FC = () => {
         ))}
       </nav>
 
-      <div className="px-2 py-3 mb-2 rounded-lg bg-surface-container-high/80 border border-outline-variant/30">
-        <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">
-          Signed in
-        </p>
-        <p
-          className="text-sm font-medium text-on-surface truncate"
-          title={email ?? undefined}
-        >
-          {email ?? "—"}
-        </p>
-        <button
-          type="button"
-          onClick={handleSignOut}
-          className="mt-2 w-full text-left text-sm font-semibold text-primary hover:underline"
-        >
-          Sign out
-        </button>
-      </div>
-
       {/* Emergency CTA */}
-      <div className="mt-auto px-2">
+      <div className="w-full mb-1.5">
         <NavLink
           to="/emergency"
           className={({ isActive }) =>
@@ -115,8 +95,27 @@ const Sidebar: React.FC = () => {
           >
             emergency
           </span>
-          Emergency Contact
+          Emergency Contacts
         </NavLink>
+      </div>
+
+      <div className="mt-auto px-2 py-3 mb-1 rounded-lg bg-surface-container-high/80 border border-outline-variant/30">
+        <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">
+          Signed in
+        </p>
+        <p
+          className="text-sm font-medium text-on-surface truncate"
+          title={email ?? undefined}
+        >
+          {email ?? "—"}
+        </p>
+        <button
+          type="button"
+          onClick={handleSignOut}
+          className="mt-2 w-full text-left text-sm font-semibold text-primary hover:underline"
+        >
+          Sign out
+        </button>
       </div>
     </aside>
   );
