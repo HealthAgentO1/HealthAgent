@@ -11,7 +11,7 @@ from typing import Any
 from django.utils import timezone
 
 from ..models import SymptomSession
-from .report_service import _known_medications
+from .report_service import medication_lines_for_session
 
 logger = logging.getLogger(__name__)
 
@@ -96,5 +96,5 @@ def apply_condition_assessment_summary(
         "reported_symptoms": [sym_str] if sym_str else [],
         "triage_level": session.triage_level,
         "overall_patient_severity": overall if isinstance(overall, str) else None,
-        "medications": _known_medications(session),
+        "medications": medication_lines_for_session(session),
     }

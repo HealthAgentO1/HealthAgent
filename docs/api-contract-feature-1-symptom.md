@@ -1,7 +1,7 @@
 # API contract — Feature 1 (Symptom-to-Care)
 
 **Status:** Draft (pre-implementation)  
-**Version:** 1.0.3  
+**Version:** 1.0.4  
 **Base URL (dev):** `http://127.0.0.1:8000/api`  
 **Primary consumer:** React frontend (`VITE_API_URL` + Axios)
 
@@ -9,7 +9,7 @@ This document defines the HTTP contract for the symptom interview, triage submis
 
 **Related:** Domain behavior and data model context live in [sympton-to-care.md](./sympton-to-care.md).
 
-**Symptom Check survey LLM:** The `/symptom-check` UI issues two `POST /api/symptom/survey-llm/` calls (authenticated). The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from `POST /symptom/chat/` (conversational JSON contract below).
+**Symptom Check survey LLM:** The `/symptom-check` UI issues one or more `POST /api/symptom/survey-llm/` calls (authenticated): follow-up question generation (one or two rounds), then condition assessment. The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; on **`condition_assessment`** it also sends **`active_medications`** (the browser active regimen: names plus optional dosage, frequency, time, refill) for pre-visit reporting. Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from `POST /symptom/chat/` (conversational JSON contract below).
 
 **Symptom Check nearby facilities:** After the second LLM call, the SPA issues **`POST /api/symptom/nearby-facilities/`** with the user’s address and NUCC `taxonomy_codes` from `care_taxonomy` (see section 4).
 
@@ -71,22 +71,25 @@ Runs one **stateless** survey turn for the React Symptom Check flow: either gene
   "user_payload": {
     "symptoms": "…",
     "insurance_label": "…"
-  }
+  },
+  "session_id": null
 }
 ```
 
 | Field | Type | Required | Notes |
 |-------|------|----------|--------|
-| `phase` | string | yes | `followup_questions` \| `condition_assessment` (echoed in response for debugging) |
+| `phase` | string | yes | `followup_questions` \| `followup_questions_round_2` \| `condition_assessment` (echoed in response for debugging) |
 | `system_prompt` | string | yes | Non-empty; in production the SPA bundles known-good templates |
-| `user_payload` | object | yes | JSON object; second call typically includes `follow_up_answers` array |
+| `user_payload` | object | yes | JSON object. **`condition_assessment`** payloads include `symptoms`, `insurance_label`, `follow_up_answers`, and **`active_medications`** (array of objects: at minimum `name`; optional `dosage_mg`, `frequency`, `time_to_take`, `refill_before`, `common_name`, `scientific_name`) so the backend can attach the same regimen to the pre-visit report. |
+| `session_id` | string (UUID) \| null | no | Omit or null on the first survey turn; set to the previously returned `session_id` on later turns so all survey steps share one `SymptomSession`. |
 
 ### Response **200 OK**
 
 ```json
 {
   "raw_text": "{ \"questions\": [ … ] }",
-  "phase": "followup_questions"
+  "phase": "followup_questions",
+  "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 }
 ```
 
@@ -94,6 +97,26 @@ Runs one **stateless** survey turn for the React Symptom Check flow: either gene
 |-------|------|-------|
 | `raw_text` | string | Model output; client MUST parse as JSON (may strip optional Markdown fences) |
 | `phase` | string | Same as request `phase` |
+| `session_id` | string (UUID) | Public id of the `SymptomSession` row; returned on every successful call — client should send it on subsequent turns |
+
+### `condition_assessment` user_payload example (medication context)
+
+```json
+{
+  "symptoms": "…",
+  "insurance_label": "…",
+  "follow_up_answers": [],
+  "active_medications": [
+    {
+      "name": "Metformin",
+      "dosage_mg": "500",
+      "frequency": "twice daily",
+      "time_to_take": "morning",
+      "refill_before": "14 days"
+    }
+  ]
+}
+```
 
 ### Errors
 
@@ -365,3 +388,4 @@ All developers MUST review this contract before Feature 1 implementation. Record
 | 1.0.1 | 2026-04-18 | Documented parallel frontend Symptom Check LLM payload (`VITE_SYMPTOM_LLM_URL`, prompt files); clarifies relation to draft `/symptom/chat/` and `/symptom/triage/` |
 | 1.0.2 | 2026-04-18 | Added implemented `POST /symptom/survey-llm/`; SPA uses Django + JWT (removed browser-only mock path) |
 | 1.0.3 | 2026-04-18 | Documented implemented `POST /symptom/nearby-facilities/` (NPPES + Census via Django) for Symptom Check results |
+| 1.0.4 | 2026-04-19 | Documented `followup_questions_round_2`, response `session_id`, and `active_medications` on `condition_assessment` for pre-visit reports |

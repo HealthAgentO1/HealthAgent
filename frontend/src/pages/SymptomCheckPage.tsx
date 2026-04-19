@@ -8,7 +8,7 @@
  */
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchSymptomSessionResume } from "../api/queries";
 import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
@@ -42,6 +42,7 @@ import {
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from "../symptomCheck/symptomCheckSession";
+import { scrollAppToTop } from "../utils/scrollAppToTop";
 
 const INSURANCE_OPTIONS = [
   { id: "united", label: "United Healthcare" },
@@ -176,16 +177,6 @@ function severityStyles(level: string): string {
   return "bg-teal-500/12 text-teal-800 border border-teal-400/35";
 }
 
-/** App content scrolls inside `Layout`'s `<main>`; reset both so each flow step starts at the top. */
-function scrollAppToTop(): void {
-  const run = () => {
-    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  };
-  run();
-  requestAnimationFrame(run);
-}
-
 /** Step 1 welcome vs questionnaire form (not persisted; URL session and resume skip welcome). */
 type IntakeSubstep = "welcome" | "form";
 
@@ -197,6 +188,7 @@ function initialIntakeSubstepFromLocation(): IntakeSubstep {
 
 const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<SymptomCheckFlowStep>("intake");
   const [intakeSubstep, setIntakeSubstep] = useState<IntakeSubstep>(initialIntakeSubstepFromLocation);
@@ -2001,6 +1993,22 @@ const SymptomCheckPage: React.FC = () => {
             </section>
 
             <div className="flex flex-wrap gap-3 justify-center">
+              {surveyBackendSessionId ? (
+                <button
+                  className="cursor-pointer px-8 py-3 rounded-lg font-headline font-semibold text-sm border border-primary/40 text-primary hover:bg-primary-fixed/10 transition-colors"
+                  type="button"
+                  onClick={() => {
+                    void (async () => {
+                      await queryClient.refetchQueries({ queryKey: ["symptom-sessions"] });
+                      navigate(`/reports?session=${encodeURIComponent(surveyBackendSessionId)}`, {
+                        state: { scrollToTop: true },
+                      });
+                    })();
+                  }}
+                >
+                  View report
+                </button>
+              ) : null}
               <button
                 className="cursor-pointer gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all"
                 type="button"
