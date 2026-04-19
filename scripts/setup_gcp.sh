@@ -90,7 +90,7 @@ echo "Waiting for IAM replication..."
 sleep 5
 
 # Assign Roles to the Project
-for ROLE in "roles/run.admin" "roles/iam.serviceAccountUser" "roles/artifactregistry.writer" "roles/cloudbuild.builds.editor" "roles/cloudsql.client" "roles/iam.serviceAccountTokenCreator"; do
+for ROLE in "roles/run.admin" "roles/iam.serviceAccountUser" "roles/artifactregistry.writer" "roles/cloudbuild.builds.editor" "roles/cloudsql.client" "roles/iam.serviceAccountTokenCreator" "roles/cloudsql.admin" "roles/serviceusage.serviceUsageConsumer"; do
     gcloud projects add-iam-policy-binding $PROJECT_ID \
         --member="serviceAccount:$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
         --role="$ROLE" 2>/dev/null || true
