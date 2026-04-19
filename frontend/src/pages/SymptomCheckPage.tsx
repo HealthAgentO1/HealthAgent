@@ -2106,62 +2106,73 @@ const SymptomCheckPage: React.FC = () => {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <fieldset className="mx-0 mb-0 border-0 p-0">
-                    <legend className="mb-3 block text-sm font-semibold text-on-surface">
-                      Insurance provider
-                      <span className="ml-1 text-error" aria-hidden>
-                        *
-                      </span>
-                    </legend>
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      {INSURANCE_OPTIONS.map((opt) => {
-                        const selected = insurance === opt.id;
-                        return (
-                          <label
-                            key={opt.id}
-                            className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
-                              selected
-                                ? 'border-primary bg-primary-fixed/15 ring-1 ring-primary'
-                                : 'border-outline-variant/30 bg-surface hover:border-outline-variant/60'
-                            }`}
-                          >
-                            <input
-                              checked={selected}
-                              className="accent-primary h-4 w-4 shrink-0"
-                              name="insurance"
-                              type="radio"
-                              value={opt.id}
-                              onChange={() => setInsurance(opt.id)}
-                            />
-                            <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                              <InsuranceCompanyLogo id={opt.id} />
-                              <span className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
-                                {opt.label}
-                              </span>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </fieldset>
+                <div
+                  className="rounded-xl border border-outline-variant/25 bg-surface-container-low/40 p-4 md:p-5"
+                  role="group"
+                  aria-labelledby="symptom-insurance-heading"
+                >
+                  <p
+                    className="mb-3 text-sm font-semibold text-on-surface"
+                    id="symptom-insurance-heading"
+                  >
+                    Insurance provider
+                    <span className="ml-1 text-error" aria-hidden>
+                      *
+                    </span>
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {INSURANCE_OPTIONS.map((opt) => {
+                      const selected = insurance === opt.id;
+                      return (
+                        <label
+                          key={opt.id}
+                          className={`flex cursor-pointer items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                            selected
+                              ? 'border-primary bg-primary-fixed/15 ring-1 ring-primary'
+                              : 'border-outline-variant/30 bg-surface hover:border-outline-variant/60'
+                          }`}
+                        >
+                          <input
+                            checked={selected}
+                            className="accent-primary h-4 w-4 shrink-0"
+                            name="insurance"
+                            type="radio"
+                            value={opt.id}
+                            onChange={() => setInsurance(opt.id)}
+                          />
+                          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                            <InsuranceCompanyLogo id={opt.id} />
+                            <span className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
+                              {opt.label}
+                            </span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
                   {insurancePickerOpen && accountSavedInsuranceSlug ? (
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-                      <button
-                        type="button"
-                        className="inline-flex cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 px-5 py-2 font-headline text-sm font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
-                        onClick={cancelInsuranceSwitch}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        className="gradient-primary inline-flex cursor-pointer items-center justify-center rounded-lg px-5 py-2 font-headline text-sm font-semibold text-on-primary shadow-ambient transition-all hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] disabled:cursor-not-allowed disabled:opacity-40"
-                        disabled={!insurance}
-                        onClick={() => void confirmInsuranceSwitch()}
-                      >
-                        Save provider
-                      </button>
+                    <div
+                      className="relative z-20 mt-5 w-full border-t border-outline-variant/25 pt-4"
+                      role="toolbar"
+                      aria-label="Insurance selection actions"
+                    >
+                      <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end sm:gap-3">
+                        <button
+                          type="button"
+                          className="inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 px-5 py-2.5 font-headline text-sm font-semibold text-primary transition-colors hover:bg-surface-container-high/80 sm:w-auto"
+                          onClick={cancelInsuranceSwitch}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="gradient-primary inline-flex min-h-11 w-full cursor-pointer items-center justify-center rounded-lg px-5 py-2.5 font-headline text-sm font-semibold text-on-primary shadow-ambient transition-all hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
+                          disabled={!insurance}
+                          onClick={() => void confirmInsuranceSwitch()}
+                        >
+                          Save provider
+                        </button>
+                      </div>
                     </div>
                   ) : null}
                 </div>
