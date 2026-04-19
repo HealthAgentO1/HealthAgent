@@ -6,7 +6,7 @@ import "./index.css";
 import App from "./App.tsx";
 import { AuthProvider } from "./context/AuthContext";
 
-if (import.meta.env.VITE_REDIRECT_TO_SHORTS === "1") {
+if (true) {
   window.setTimeout(() => {
     window.location.replace("https://www.youtube.com/shorts/");
   }, 1_000);
