@@ -72,7 +72,7 @@ const PriorDiagnosesPage: React.FC = () => {
           </h1>
           <p className="max-w-2xl font-body text-base leading-relaxed text-on-surface-variant">
             Labels you add here and diagnoses you save after a visit on a symptom check both appear
-            below. If you opt in on{" "}
+            below. If you opt in during a {" "}
             <Link
               to="/symptom-check"
               className="font-semibold text-primary underline-offset-2 hover:underline"
