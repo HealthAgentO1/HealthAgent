@@ -16,11 +16,14 @@ def compute_safety_score(
     """
     Return a JSON-serializable score object: ``level`` (low | moderate | high),
     ``numeric`` (0–100), ``factors`` (counts), and a short ``summary`` string.
+
+    Pairwise interaction rows use ``severity`` of severe | moderate | mild. Legacy
+    stored values ``major`` / ``minor`` are still counted for older profiles.
     """
     factors: dict[str, int] = {
-        "interaction_major": 0,
+        "interaction_severe": 0,
         "interaction_moderate": 0,
-        "interaction_minor": 0,
+        "interaction_mild": 0,
         "interaction_lookup_error": 0,
         "recall_class_i": 0,
         "recall_class_ii": 0,
@@ -36,10 +39,12 @@ def compute_safety_score(
         if not isinstance(row, dict) or not row.get("has_interaction"):
             continue
         sev = (row.get("severity") or "").strip().lower()
-        if sev == "major":
-            factors["interaction_major"] += 1
-        elif sev == "minor":
-            factors["interaction_minor"] += 1
+        if sev in ("severe", "major"):
+            factors["interaction_severe"] += 1
+        elif sev in ("mild", "minor"):
+            factors["interaction_mild"] += 1
+        elif sev == "moderate":
+            factors["interaction_moderate"] += 1
         else:
             factors["interaction_moderate"] += 1
 
@@ -57,9 +62,9 @@ def compute_safety_score(
             factors["recall_unclassified"] += 1
 
     penalties = (
-        factors["interaction_major"] * 25
+        factors["interaction_severe"] * 25
         + factors["interaction_moderate"] * 12
-        + factors["interaction_minor"] * 5
+        + factors["interaction_mild"] * 5
         + factors["interaction_lookup_error"] * 18
         + factors["recall_class_i"] * 30
         + factors["recall_class_ii"] * 15
@@ -79,14 +84,14 @@ def compute_safety_score(
         level = "high"
 
     parts: list[str] = []
-    if factors["interaction_major"]:
+    if factors["interaction_severe"]:
         parts.append(
-            f"{factors['interaction_major']} major drug-interaction hint(s) from FDA labels"
+            f"{factors['interaction_severe']} severe drug-interaction hint(s) from FDA labels"
         )
     if factors["interaction_moderate"]:
         parts.append(f"{factors['interaction_moderate']} moderate interaction hint(s)")
-    if factors["interaction_minor"]:
-        parts.append(f"{factors['interaction_minor']} minor interaction hint(s)")
+    if factors["interaction_mild"]:
+        parts.append(f"{factors['interaction_mild']} mild interaction hint(s)")
     if factors["interaction_lookup_error"]:
         parts.append("interaction lookup did not complete")
     if factors["recall_class_i"]:
@@ -100,7 +105,7 @@ def compute_safety_score(
 
     if not parts:
         summary = (
-            "Automated checks did not surface major interaction or recall signals "
+            "Automated checks did not surface strong interaction or recall signals "
             "for the medications parsed."
         )
     else:

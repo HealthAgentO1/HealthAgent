@@ -11,6 +11,7 @@ from .serializers import MedicationProfileExtractResponseSerializer
 from .services.medication_check_service import run_medication_check
 from .services.medication_extraction import MedicationLlmError, extract_medications_with_rxnorm
 from .services.openfda_interactions import compute_pairwise_interactions
+from .services.regimen_safety_service import run_regimen_openfda_check
 
 
 class MedicationProfileExtractView(APIView):
@@ -64,6 +65,7 @@ class MedicationProfileExtractView(APIView):
                     "error": str(exc),
                     "pairwise": [],
                     "per_drug_notes": [],
+                    "per_drug_label_safety": [],
                     "pairs_checked": 0,
                 }
 
@@ -119,3 +121,63 @@ class MedicationCheckView(APIView):
             )
 
         return Response(payload, status=status.HTTP_201_CREATED)
+
+
+def _normalize_regimen_medications(raw: object) -> list[dict] | None:
+    """Validate client regimen payload: list of { name, rxnorm_id?, scientific_name?, common_name? }."""
+    if not isinstance(raw, list) or not raw:
+        return None
+    out: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        row: dict = {"name": name.strip()}
+        rx = item.get("rxnorm_id")
+        if rx is not None and rx != "":
+            row["rxnorm_id"] = str(rx)
+        sci = item.get("scientific_name")
+        if isinstance(sci, str) and sci.strip():
+            row["scientific_name"] = sci.strip()
+        com = item.get("common_name")
+        if isinstance(com, str) and com.strip():
+            row["common_name"] = com.strip()
+        out.append(row)
+    return out if out else None
+
+
+class RegimenSafetyView(APIView):
+    """
+    POST /api/medication/regimen-safety/
+
+    openFDA-only analysis for the browser-stored active regimen: SPL sections per drug,
+    pairwise label interaction hints, enforcement recalls, and aggregate score.
+    Does not call the LLM and does not persist a MedicationProfile row.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        medications = _normalize_regimen_medications(request.data.get("medications"))
+        if medications is None:
+            return Response(
+                {
+                    "error": (
+                        "Provide a non-empty `medications` array with objects "
+                        "containing a non-empty `name` string."
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            payload = run_regimen_openfda_check(medications)
+        except Exception as exc:
+            return Response(
+                {"error": f"Regimen safety check failed: {exc}"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(payload, status=status.HTTP_200_OK)

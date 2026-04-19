@@ -1,7 +1,15 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { AddPrescriptionModal } from "../medicationSafety/AddPrescriptionModal";
 import { displayOrDash } from "../medicationSafety/display";
+import { DrugInteractionConflictsPanel } from "../medicationSafety/DrugInteractionConflictsPanel";
+import { aggregateDrugRiskTier, findPerDrugRow, recallsForProfileMedication } from "../medicationSafety/drugRiskAssessment";
+import type { RegimenSafetyResponse } from "../medicationSafety/regimenSafetyClient";
+import {
+  loadRegimenSafetyCached,
+  readCachedRegimenSafety,
+  regimenIdentityFingerprint,
+} from "../medicationSafety/regimenSafetyCache";
 import { MedicationNameHeading } from "../medicationSafety/MedicationNameHeading";
 import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
 import type { ActiveMedication } from "../medicationSafety/types";
@@ -11,7 +19,7 @@ function formatDosage(mg: string | null): string {
   return `${mg.trim()} mg`;
 }
 
-function RegimenCard({ med }: { med: ActiveMedication }) {
+function RegimenCard({ med, showHighRiskBadge }: { med: ActiveMedication; showHighRiskBadge: boolean }) {
   return (
     <Link
       className="flex flex-col md:flex-row gap-6 items-start md:items-center relative rounded-xl border-ghost bg-surface-container-lowest p-6 shadow-[0_12px_32px_rgba(24,28,32,0.05)] transition-[box-shadow] duration-200 hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"
@@ -53,9 +61,18 @@ function RegimenCard({ med }: { med: ActiveMedication }) {
           </div>
         </div>
       </div>
-      <span className="material-symbols-outlined text-on-surface-variant absolute top-6 right-6 md:static md:mt-0">
-        chevron_right
-      </span>
+      <div className="absolute top-6 right-6 md:static flex items-center gap-2 shrink-0 self-start md:self-center">
+        {showHighRiskBadge ? (
+          <span
+            aria-label="Important safety information — open this medication for details"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-orange-500/20 text-orange-900 text-sm font-black border border-orange-400/50"
+            title="Important safety information on detail page"
+          >
+            !
+          </span>
+        ) : null}
+        <span className="material-symbols-outlined text-on-surface-variant text-2xl">chevron_right</span>
+      </div>
     </Link>
   );
 }
@@ -63,10 +80,73 @@ function RegimenCard({ med }: { med: ActiveMedication }) {
 const MedicationSafetyPage: React.FC = () => {
   const [regimen, setRegimen] = useState<ActiveMedication[]>(() => loadActiveRegimen());
   const [addOpen, setAddOpen] = useState(false);
+  const [safetyLoading, setSafetyLoading] = useState(false);
+  const [safetyError, setSafetyError] = useState<string | null>(null);
+  const [safetyData, setSafetyData] = useState<RegimenSafetyResponse | null>(null);
 
   const refresh = useCallback(() => {
     setRegimen(loadActiveRegimen());
   }, []);
+
+  /** Identity-only: refetch openFDA when meds are added/removed or identity fields change — not dosage edits. */
+  const regimenIdentityKey = useMemo(() => regimenIdentityFingerprint(regimen), [regimen]);
+
+  useEffect(() => {
+    if (regimen.length === 0) {
+      setSafetyData(null);
+      setSafetyError(null);
+      setSafetyLoading(false);
+      return;
+    }
+    const fp = regimenIdentityFingerprint(regimen);
+    const cached = readCachedRegimenSafety(fp);
+    if (cached) {
+      setSafetyData(cached);
+      setSafetyError(null);
+      setSafetyLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setSafetyLoading(true);
+    setSafetyError(null);
+    void loadRegimenSafetyCached(regimen)
+      .then((d) => {
+        if (!cancelled) {
+          setSafetyData(d);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setSafetyData(null);
+          setSafetyError(e instanceof Error ? e.message : "Failed to load safety data.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSafetyLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [regimenIdentityKey]);
+
+  /** Exclamation on the card when SPL/recall tier is **high** (boxed warning, contraindications, Class I recall). */
+  const highRiskByMedId = useMemo(() => {
+    const m = new Map<string, boolean>();
+    if (!safetyData) {
+      return m;
+    }
+    const rows = safetyData.interaction_results.per_drug_label_safety || [];
+    const recalls = (safetyData.recalls.recalls || []) as Array<Record<string, unknown>>;
+    for (const med of regimen) {
+      const row = findPerDrugRow(med.name, rows);
+      const mine = recallsForProfileMedication(med.name, recalls);
+      const tier = aggregateDrugRiskTier(row, mine);
+      m.set(med.id, tier === "high");
+    }
+    return m;
+  }, [regimen, safetyData]);
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12">
@@ -82,8 +162,8 @@ const MedicationSafetyPage: React.FC = () => {
           Medication Safety
         </h1>
         <p className="text-on-surface-variant font-body text-base max-w-2xl">
-          Review your current prescriptions, active dosages, and monitor for potential interaction
-          risks.
+          Review your prescriptions and regimen details. Drug–drug conflicts appear on the right; label
+          warnings and recalls are on each medication&apos;s detail page.
         </p>
       </div>
 
@@ -119,64 +199,24 @@ const MedicationSafetyPage: React.FC = () => {
                 </button>
               </div>
             ) : (
-              regimen.map((med) => <RegimenCard key={med.id} med={med} />)
+              regimen.map((med) => (
+                <RegimenCard
+                  key={med.id}
+                  med={med}
+                  showHighRiskBadge={highRiskByMedId.get(med.id) === true}
+                />
+              ))
             )}
           </div>
         </div>
 
-        {/* Right: Safety alerts (structure retained; content is non-interactive placeholders until interaction checks ship) */}
-        <div className="space-y-6">
-          <div className="bg-surface-container-low p-6 rounded-xl border border-surface-container-highest relative overflow-hidden">
-            <div className="absolute -right-10 -top-10 opacity-10 pointer-events-none">
-              <span
-                className="material-symbols-outlined text-9xl text-on-surface-variant"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                warning
-              </span>
-            </div>
-            <div className="flex items-center gap-3 mb-4 relative z-10">
-              <span
-                className="material-symbols-outlined text-on-surface-variant text-2xl"
-                style={{ fontVariationSettings: "'FILL' 1" }}
-              >
-                error
-              </span>
-              <h3 className="text-xl font-headline font-bold text-primary">Interaction alerts</h3>
-            </div>
-            <div className="bg-surface-container-lowest p-4 rounded-lg border-ghost mb-4 relative z-10 min-h-[88px] flex items-center justify-center">
-              <p className="text-sm text-on-surface-variant font-body text-center">
-                No interaction checks yet. When your regimen is analyzed, alerts will appear here.
-              </p>
-            </div>
-            <button
-              className="w-full bg-surface-container-highest text-on-surface-variant py-3 rounded font-semibold font-headline cursor-not-allowed opacity-70 relative z-10"
-              disabled
-              type="button"
-            >
-              Review alternatives
-            </button>
-          </div>
-
-          <div className="bg-surface-container-low p-6 rounded-xl border border-surface-container-highest">
-            <h3 className="text-lg font-headline font-bold text-primary mb-3 flex items-center gap-2">
-              <span className="material-symbols-outlined text-secondary">health_and_safety</span>
-              Safer alternatives
-            </h3>
-            <p className="text-sm text-on-surface-variant mb-4">
-              When an interaction is found, we will suggest options to discuss with your care team.
-            </p>
-            <div className="bg-surface-container-lowest p-4 rounded-lg border-ghost min-h-[72px] flex items-center justify-center mb-4">
-              <p className="text-sm text-on-surface-variant text-center">No suggestions yet.</p>
-            </div>
-            <button
-              className="w-full bg-surface-container-highest text-on-surface-variant py-2 rounded font-semibold text-sm cursor-not-allowed opacity-70"
-              disabled
-              type="button"
-            >
-              Message care team
-            </button>
-          </div>
+        {/* Right: drug–drug interactions */}
+        <div>
+          <DrugInteractionConflictsPanel
+            data={regimen.length === 0 ? null : safetyData}
+            error={safetyError}
+            loading={safetyLoading && regimen.length > 0}
+          />
         </div>
       </div>
     </div>

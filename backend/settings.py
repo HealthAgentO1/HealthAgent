@@ -246,3 +246,5 @@ OPENFDA_LABEL_URL = os.environ.get(
 ).strip()
 OPENFDA_REQUEST_TIMEOUT = int(os.environ.get("OPENFDA_REQUEST_TIMEOUT", "25"))
 OPENFDA_CACHE_TTL_SECONDS = int(os.environ.get("OPENFDA_CACHE_TTL_SECONDS", str(86_400)))
+# Truncate long SPL sections in JSON responses (per section).
+OPENFDA_MAX_SECTION_CHARS = int(os.environ.get("OPENFDA_MAX_SECTION_CHARS", "6000"))
