@@ -181,7 +181,10 @@ const ReportsPage: React.FC = () => {
                 onClick={() => {
                   const id = confirmDeleteSessionId;
                   setConfirmDeleteSessionId(null);
-                  if (id) deleteSession.mutate(id);
+                  if (id) {
+                    deleteSession.reset();
+                    deleteSession.mutate(id);
+                  }
                 }}
                 type="button"
               >
@@ -189,7 +192,10 @@ const ReportsPage: React.FC = () => {
               </button>
               <button
                 className="cursor-pointer px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
-                onClick={() => setConfirmDeleteSessionId(null)}
+                onClick={() => {
+                  deleteSession.reset();
+                  setConfirmDeleteSessionId(null);
+                }}
                 type="button"
               >
                 Cancel
@@ -199,7 +205,7 @@ const ReportsPage: React.FC = () => {
         </div>
       ) : null}
 
-      <div className="max-w-6xl mx-auto space-y-8">
+      <div className="mx-auto max-w-6xl min-w-0 space-y-8">
         <header>
           <h1 className="font-headline text-4xl md:text-[3rem] leading-none font-bold text-primary tracking-tight mb-2">
             Reports
@@ -239,7 +245,7 @@ const ReportsPage: React.FC = () => {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,300px)_1fr] gap-6 lg:gap-10 items-start">
+          <div className="grid min-w-0 grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(240px,300px)_minmax(0,1fr)] lg:gap-10">
             {deleteSession.isError ? (
               <div
                 className="lg:col-span-2 rounded-xl border border-error-container/40 bg-error-container/10 px-4 py-3 font-body text-sm text-on-error-container"
@@ -252,7 +258,7 @@ const ReportsPage: React.FC = () => {
             ) : null}
             <nav
               aria-label="Past symptom checks"
-              className="rounded-xl border border-ghost bg-surface-container-lowest shadow-ambient overflow-hidden"
+              className="min-w-0 rounded-xl border border-ghost bg-surface-container-lowest shadow-ambient overflow-hidden"
             >
               <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low/80">
                 <p className="font-headline text-xs font-bold uppercase tracking-wider text-on-surface-variant">
@@ -291,25 +297,22 @@ const ReportsPage: React.FC = () => {
                       </button>
                       <button
                         type="button"
-                        className="absolute inset-y-1 right-1 z-10 flex cursor-pointer items-center justify-center rounded-md text-error outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50"
+                        className={
+                          deletingThis
+                            ? "absolute inset-y-1 right-1 z-10 flex h-10 w-10 cursor-pointer items-center justify-center rounded-md border border-error/35 bg-error/10 text-error shadow-sm outline-none transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50 opacity-100 pointer-events-auto"
+                            : "absolute inset-y-1 right-1 z-10 flex h-10 w-10 cursor-pointer items-center justify-center rounded-md border border-error/35 bg-error/10 text-error shadow-sm outline-none transition-opacity focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50 opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:pointer-events-auto md:group-hover:opacity-100 md:group-focus-within:pointer-events-auto md:group-focus-within:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 [@media(any-pointer:coarse)]:pointer-events-auto [@media(any-pointer:coarse)]:opacity-100"
+                        }
                         aria-label="Delete this report"
                         disabled={deletingThis}
                         onClick={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
+                          deleteSession.reset();
                           setConfirmDeleteSessionId(s.session_id);
                         }}
                       >
-                        <span
-                          className={`inline-flex items-center justify-center rounded-lg border border-error/35 bg-error/10 p-1.5 shadow-sm transition-opacity duration-150 ${
-                            deletingThis
-                              ? "opacity-100"
-                              : "opacity-0 max-md:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
-                          }`}
-                        >
-                          <span className="material-symbols-outlined text-[20px]" aria-hidden>
-                            delete
-                          </span>
+                        <span className="material-symbols-outlined text-[20px]" aria-hidden>
+                          delete
                         </span>
                       </button>
                     </li>
@@ -318,7 +321,7 @@ const ReportsPage: React.FC = () => {
               </ul>
             </nav>
 
-            <article className="rounded-xl border border-ghost bg-surface-container-lowest p-5 md:p-7 shadow-ambient min-h-[320px]">
+            <article className="min-h-[320px] min-w-0 rounded-xl border border-ghost bg-surface-container-lowest p-5 shadow-ambient md:p-7">
               {selectedId && !selected && isFetching ? (
                 <div className="flex flex-col items-center justify-center min-h-[240px] gap-3 text-on-surface-variant font-body text-sm">
                   <div
@@ -329,39 +332,42 @@ const ReportsPage: React.FC = () => {
                 </div>
               ) : selected ? (
                 <>
-                  <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-2">
-                    <div>
+                  <div className="mb-2 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 shrink sm:max-w-[min(100%,26rem)] sm:pr-2">
                       <h2 className="font-headline text-xl font-bold text-primary mb-1">Pre-visit summary</h2>
                       <p className="font-body text-xs text-on-surface-variant">
                         {formatSessionTimestamp(selected.created_at)}
                       </p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    <div className="flex min-w-0 w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:max-w-full sm:flex-1 sm:justify-end">
                       <button
                         type="button"
                         disabled={pdfBusy}
                         onClick={() => void handleDownloadPdf()}
                         className="inline-flex cursor-pointer items-center gap-2 bg-primary text-on-primary font-headline text-sm font-bold py-2.5 px-4 rounded-lg shadow-ambient hover:opacity-95 transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
                       >
-                        <span className="material-symbols-outlined text-[20px]">download</span>
+                        <span className="material-symbols-outlined text-[20px] shrink-0">download</span>
                         {pdfBusy ? "Preparing…" : "Download PDF"}
                       </button>
                       <Link
-                        className="inline-flex items-center gap-1 font-body text-sm font-semibold text-primary border border-outline-variant/40 rounded-lg py-2 px-4 hover:bg-surface-container-high/80 transition-colors"
+                        className="inline-flex items-center gap-1 font-body text-sm font-semibold text-primary border border-outline-variant/40 rounded-lg py-2 px-4 hover:bg-surface-container-high/80 transition-colors min-w-0"
                         to={`/symptom-check?session=${encodeURIComponent(selected.session_id)}`}
                       >
-                        Open in Symptom Check
-                        <span className="material-symbols-outlined text-lg leading-none">arrow_forward</span>
+                        <span className="truncate">Open in Symptom Check</span>
+                        <span className="material-symbols-outlined text-lg leading-none shrink-0">arrow_forward</span>
                       </Link>
                       <button
                         type="button"
                         disabled={
                           deleteSession.isPending && deleteSession.variables === selected.session_id
                         }
-                        onClick={() => setConfirmDeleteSessionId(selected.session_id)}
-                        className="inline-flex items-center gap-2 font-body text-sm font-semibold text-error border border-error/40 bg-error/10 rounded-lg py-2 px-4 hover:bg-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        onClick={() => {
+                          deleteSession.reset();
+                          setConfirmDeleteSessionId(selected.session_id);
+                        }}
+                        className="inline-flex items-center justify-center gap-2 font-body text-sm font-semibold text-error border border-error/40 bg-error/10 rounded-lg py-2 px-4 hover:bg-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap shrink-0"
                       >
-                        <span className="material-symbols-outlined text-[20px]">delete</span>
+                        <span className="material-symbols-outlined text-[20px] shrink-0">delete</span>
                         Delete report
                       </button>
                     </div>
