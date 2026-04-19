@@ -2,6 +2,9 @@
 Pairwise drug–drug interaction hints using the openFDA **drug label** API
 (`drug/label.json`). Labels expose `drug_interactions` (FDA section 7) as searchable text.
 
+We also surface other SPL-derived sections (boxed warning, contraindications, adverse
+reactions, etc.) for display alongside interaction hints.
+
 This is informational only — not a substitute for clinical decision support or pharmacist review.
 """
 
@@ -33,6 +36,8 @@ OPENFDA_LABEL_URL = getattr(
 OPENFDA_API_KEY = getattr(settings, "OPENFDA_API_KEY", "") or ""
 # Local process cache to avoid duplicate openFDA calls (per deploy / worker).
 OPENFDA_CACHE_TTL_SECONDS = int(getattr(settings, "OPENFDA_CACHE_TTL_SECONDS", 86_400))
+# Cap each SPL text blob so API responses stay bounded (labels can be very long).
+OPENFDA_MAX_SECTION_CHARS = int(getattr(settings, "OPENFDA_MAX_SECTION_CHARS", 6_000))
 
 _cache_lock = threading.Lock()
 # key -> (monotonic_expiry, payload) where payload is raw first "results" item or None marker
@@ -97,6 +102,7 @@ def _collect_match_tokens(drug_name: str) -> list[str]:
 
 
 def _concat_interaction_sections(label: dict[str, Any]) -> str:
+    """Text used to search for mentions of another drug (interactions + related warnings)."""
     parts: list[str] = []
     for key in ("drug_interactions", "drug_interactions_table", "warnings_and_cautions"):
         block = label.get(key)
@@ -107,22 +113,99 @@ def _concat_interaction_sections(label: dict[str, Any]) -> str:
     return "\n\n".join(parts)
 
 
-def fetch_openfda_label_for_term(session: requests.Session, term: str) -> dict[str, Any] | None:
+# SPL-derived keys present on many openFDA label results (not every product has every field).
+# See https://open.fda.gov/apis/drug/label/searchable-fields/
+_SPL_TEXT_FIELD_KEYS: tuple[str, ...] = (
+    "boxed_warning",
+    "boxed_warning_table",
+    "contraindications",
+    "contraindications_table",
+    "warnings_and_cautions",
+    "warnings",
+    "warnings_table",
+    "precautions",
+    "precautions_table",
+    "general_precautions",
+    "adverse_reactions",
+    "adverse_reactions_table",
+    "drug_interactions",
+    "drug_interactions_table",
+    "drug_and_or_laboratory_test_interactions",
+    "drug_and_or_laboratory_test_interactions_table",
+    "information_for_patients",
+    "user_safety_warnings",
+    "nursing_mothers",
+    "pediatric_use",
+    "geriatric_use",
+    "use_in_specific_populations",
+)
+
+
+def _spl_field_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return "\n\n".join(str(x).strip() for x in value if x)
+    return str(value).strip()
+
+
+def _truncate_for_api(text: str, max_chars: int) -> str:
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max(0, max_chars - 1)] + "…"
+
+
+def extract_spl_sections_for_display(
+    label: dict[str, Any] | None,
+    *,
+    max_chars: int | None = None,
+) -> dict[str, str]:
     """
-    GET openFDA drug label (first hit) for `openfda.generic_name` ~ term.
-    Results are cached in-process for OPENFDA_CACHE_TTL_SECONDS.
+    Map openFDA label JSON to a flat dict of non-empty SPL section id -> text for API/UI.
+
+    Keys mirror openFDA field names so the frontend can apply stable display titles.
+    """
+    if not label or not isinstance(label, dict):
+        return {}
+    cap = max_chars if max_chars is not None else OPENFDA_MAX_SECTION_CHARS
+    out: dict[str, str] = {}
+    for key in _SPL_TEXT_FIELD_KEYS:
+        raw = _spl_field_to_text(label.get(key))
+        if not raw:
+            continue
+        out[key] = _truncate_for_api(raw, cap)
+    return out
+
+
+def _escape_lucene_term(term: str) -> str:
+    return term.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _fetch_label_by_field(
+    session: requests.Session,
+    openfda_field: str,
+    term: str,
+) -> dict[str, Any] | None:
+    """
+    GET openFDA drug label (first hit) for ``openfda.<field>`` matching ``term``.
+
+    ``openfda_field`` is ``generic_name`` or ``brand_name``. Results are cached per process.
     """
     term = (term or "").strip()
-    if not term:
+    if not term or openfda_field not in ("generic_name", "brand_name"):
         return None
 
-    cache_key = f"gen:{term.lower()}"
+    q = _escape_lucene_term(term)
+    cache_key = f"{openfda_field}:{term.lower()}"
     cached = _cache_get(cache_key)
     if cached is not _MISSING:
         return cached
 
     params: dict[str, str | int] = {
-        "search": f'openfda.generic_name:"{term}"',
+        "search": f'openfda.{openfda_field}:"{q}"',
         "limit": 1,
     }
     if OPENFDA_API_KEY:
@@ -137,7 +220,12 @@ def fetch_openfda_label_for_term(session: requests.Session, term: str) -> dict[s
         resp.raise_for_status()
         body = resp.json()
     except (requests.RequestException, ValueError) as e:
-        logger.warning("openFDA label request failed for term=%r: %s", term, e)
+        logger.warning(
+            "openFDA label request failed field=%s term=%r: %s",
+            openfda_field,
+            term,
+            e,
+        )
         _cache_set(cache_key, None)
         return None
 
@@ -148,7 +236,7 @@ def fetch_openfda_label_for_term(session: requests.Session, term: str) -> dict[s
         return first
 
     # Broad fallback without inner quotes (some labels index differently)
-    params2 = {"search": f"openfda.generic_name:{term}", "limit": 1}
+    params2 = {"search": f"openfda.{openfda_field}:{term}", "limit": 1}
     if OPENFDA_API_KEY:
         params2["api_key"] = OPENFDA_API_KEY
     try:
@@ -160,7 +248,12 @@ def fetch_openfda_label_for_term(session: requests.Session, term: str) -> dict[s
         resp2.raise_for_status()
         body2 = resp2.json()
     except (requests.RequestException, ValueError) as e:
-        logger.warning("openFDA label fallback failed for term=%r: %s", term, e)
+        logger.warning(
+            "openFDA label fallback failed field=%s term=%r: %s",
+            openfda_field,
+            term,
+            e,
+        )
         _cache_set(cache_key, None)
         return None
 
@@ -172,6 +265,68 @@ def fetch_openfda_label_for_term(session: requests.Session, term: str) -> dict[s
 
     _cache_set(cache_key, None)
     return None
+
+
+def fetch_openfda_label_for_term(session: requests.Session, term: str) -> dict[str, Any] | None:
+    """
+    GET openFDA drug label (first hit) for ``openfda.generic_name`` ~ term.
+
+    Kept for tests and call sites that only have a generic-style token.
+    """
+    return _fetch_label_by_field(session, "generic_name", term)
+
+
+def _openfda_lookup_attempts(med: dict[str, Any]) -> list[tuple[str, str]]:
+    """
+    Build ordered (openfda_field, token) attempts.
+
+    Prefer **scientific** / generic strings on ``generic_name``, then display name on
+    ``generic_name``, then **common** (brand) and display name on ``brand_name``.
+    """
+    attempts: list[tuple[str, str]] = []
+    seen: set[str] = set()
+
+    def add(field: str, raw: str | None) -> None:
+        if not isinstance(raw, str) or not raw.strip():
+            return
+        t = _primary_search_term(raw)
+        if len(t) < 3:
+            return
+        sig = f"{field}:{t}"
+        if sig in seen:
+            return
+        seen.add(sig)
+        attempts.append((field, t))
+
+    sci = med.get("scientific_name")
+    if isinstance(sci, str) and sci.strip():
+        add("generic_name", sci)
+    add("generic_name", med.get("name"))
+    com = med.get("common_name")
+    if isinstance(com, str) and com.strip():
+        add("brand_name", com)
+    add("brand_name", med.get("name"))
+    return attempts
+
+
+def fetch_openfda_label_for_medication(
+    session: requests.Session,
+    med: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
+    """
+    Try generic-name search (scientific first), then brand-name search, until a label hits.
+
+    Returns ``(label, {"field": "generic_name"|"brand_name", "term": "..."})`` or ``(None, None)``.
+    """
+    for field, token in _openfda_lookup_attempts(med):
+        label = _fetch_label_by_field(session, field, token)
+        if label:
+            return label, {"field": field, "term": token}
+    return None, None
+
+
+def _med_key(display_name: str) -> str:
+    return (display_name or "").strip().lower()
 
 
 def _text_mentions_drug(haystack_lower: str, drug_b_name: str) -> bool:
@@ -199,6 +354,12 @@ def _snippet_around(haystack: str, needle: str, radius: int = 380) -> str:
 
 
 def _severity_from_snippet(snippet_lower: str) -> str:
+    """
+    Map a label excerpt to mild / moderate / severe using keyword heuristics.
+
+    These strings are consumed by the aggregate safety score and the SPA; they are
+    not clinical grades.
+    """
     if any(
         x in snippet_lower
         for x in (
@@ -211,7 +372,7 @@ def _severity_from_snippet(snippet_lower: str) -> str:
             "life-threatening",
         )
     ):
-        return "major"
+        return "severe"
     if any(
         x in snippet_lower
         for x in (
@@ -228,8 +389,70 @@ def _severity_from_snippet(snippet_lower: str) -> str:
     ):
         return "moderate"
     if any(x in snippet_lower for x in ("monitor", "caution", "consider", "dose adjustment")):
-        return "minor"
+        return "mild"
     return "moderate"
+
+
+def _prefetch_openfda_labels(
+    sess: requests.Session,
+    meds: list[dict[str, Any]],
+    out: dict[str, Any],
+) -> tuple[
+    dict[str, dict[str, Any] | None],
+    dict[str, str],
+    dict[str, dict[str, str] | None],
+]:
+    """Fetch one label per medication using tiered generic-then-brand openFDA queries."""
+    med_to_label: dict[str, dict[str, Any] | None] = {}
+    med_to_text: dict[str, str] = {}
+    med_to_query: dict[str, dict[str, str] | None] = {}
+
+    for m in meds:
+        key = _med_key(m["name"])
+        if key in med_to_label:
+            continue
+        label, query = fetch_openfda_label_for_medication(sess, m)
+        med_to_label[key] = label
+        med_to_query[key] = query
+        med_to_text[key] = _concat_interaction_sections(label) if label else ""
+        if not label:
+            out["per_drug_notes"].append(
+                {
+                    "drug": m["name"],
+                    "term": _primary_search_term(m["name"]),
+                    "note": (
+                        "No matching FDA label found after searching generic_name and brand_name "
+                        "on openFDA (scientific name is preferred when provided)."
+                    ),
+                },
+            )
+
+    return med_to_label, med_to_text, med_to_query
+
+
+def _build_per_drug_label_safety(
+    meds: list[dict[str, Any]],
+    med_to_label: dict[str, dict[str, Any] | None],
+    med_to_query: dict[str, dict[str, str] | None],
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for m in meds:
+        key = _med_key(m["name"])
+        label_dict = med_to_label.get(key)
+        label_dict = label_dict if isinstance(label_dict, dict) else None
+        query = med_to_query.get(key)
+        display_term = query["term"] if query else _primary_search_term(m["name"])
+        rows.append(
+            {
+                "drug": m["name"],
+                "search_term": display_term or "",
+                "label_query": query,
+                "label_found": bool(label_dict),
+                "sections": extract_spl_sections_for_display(label_dict),
+                "openfda": label_dict.get("openfda") if label_dict else None,
+            },
+        )
+    return rows
 
 
 def compute_pairwise_interactions(
@@ -238,13 +461,22 @@ def compute_pairwise_interactions(
     session: requests.Session | None = None,
 ) -> dict[str, Any]:
     """
-    For each unordered pair (A, B), load FDA label text for A and check whether the
-    `drug_interactions` (+ related) sections mention B by name; repeat for B mentioning A.
+    Load FDA SPL text per regimen drug, then:
 
-    Returns a JSON-serializable dict suitable for `MedicationProfile.interaction_results`.
+    - For each unordered pair (A, B), check whether ``drug_interactions`` (+ related)
+      text from A's label mentions B (and vice versa).
+    - Attach ``per_drug_label_safety`` with boxed warnings, contraindications, adverse
+      reactions, and other SPL sections for each drug (when a label is found).
+
+    Returns a JSON-serializable dict suitable for ``MedicationProfile.interaction_results``.
     """
     own_session = session is None
     sess = session or requests.Session()
+
+    def _optional_name_field(raw: Any) -> str | None:
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        return None
 
     meds: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -258,53 +490,49 @@ def compute_pairwise_interactions(
         if key in seen:
             continue
         seen.add(key)
-        meds.append({"name": n.strip(), "rxnorm_id": item.get("rxnorm_id")})
+        row: dict[str, Any] = {"name": n.strip(), "rxnorm_id": item.get("rxnorm_id")}
+        sci = _optional_name_field(item.get("scientific_name"))
+        if sci:
+            row["scientific_name"] = sci
+        com = _optional_name_field(item.get("common_name"))
+        if com:
+            row["common_name"] = com
+        meds.append(row)
 
     out: dict[str, Any] = {
         "source": "openfda_drug_label",
         "label_url": OPENFDA_LABEL_URL,
+        "severity_scale": (
+            "Pairwise interaction hints use keyword heuristics on FDA label wording, "
+            "reported as severe, moderate, or mild (informational only)."
+        ),
         "pairwise": [],
         "per_drug_notes": [],
+        "per_drug_label_safety": [],
         "pairs_checked": 0,
     }
+
+    if not meds:
+        if own_session:
+            sess.close()
+        return out
+
+    med_to_label, med_to_text, med_to_query = _prefetch_openfda_labels(sess, meds, out)
+    out["per_drug_label_safety"] = _build_per_drug_label_safety(meds, med_to_label, med_to_query)
 
     if len(meds) < 2:
         if own_session:
             sess.close()
         return out
 
-    # Pre-fetch label blobs per unique primary term
-    term_to_text: dict[str, str] = {}
-    for m in meds:
-        term = _primary_search_term(m["name"])
-        if not term or term in term_to_text:
-            continue
-        label = fetch_openfda_label_for_term(sess, term)
-
-        if not label:
-            out["per_drug_notes"].append(
-                {
-                    "drug": m["name"],
-                    "term": term,
-                    "note": "No matching FDA label found for this search term.",
-                },
-            )
-            term_to_text[term] = ""
-            continue
-
-        text = _concat_interaction_sections(label)
-        term_to_text[term] = text
-
-    n = len(meds)
-    for i in range(n):
-        for j in range(i + 1, n):
+    n_meds = len(meds)
+    for i in range(n_meds):
+        for j in range(i + 1, n_meds):
             a, b = meds[i], meds[j]
-            term_a = _primary_search_term(a["name"])
-            term_b = _primary_search_term(b["name"])
             out["pairs_checked"] += 1
 
-            text_a = term_to_text.get(term_a, "")
-            text_b = term_to_text.get(term_b, "")
+            text_a = med_to_text.get(_med_key(a["name"]), "")
+            text_b = med_to_text.get(_med_key(b["name"]), "")
             low_a, low_b = text_a.lower(), text_b.lower()
 
             hit_from_a = bool(text_a) and _text_mentions_drug(low_a, b["name"])
@@ -337,7 +565,9 @@ def compute_pairwise_interactions(
                         "has_interaction": True,
                         "severity": sev,
                         "description": snippet,
-                        "direction": f"FDA label ({a['name']}) drug interactions section references {b['name']}.",
+                        "direction": (
+                            f"FDA label ({a['name']}) drug interactions section references {b['name']}."
+                        ),
                     },
                 )
             elif hit_from_b:
@@ -354,7 +584,9 @@ def compute_pairwise_interactions(
                         "has_interaction": True,
                         "severity": sev,
                         "description": snippet,
-                        "direction": f"FDA label ({b['name']}) drug interactions section references {a['name']}.",
+                        "direction": (
+                            f"FDA label ({b['name']}) drug interactions section references {a['name']}."
+                        ),
                     },
                 )
 
@@ -372,6 +604,8 @@ def clear_openfda_cache_for_tests() -> None:
 __all__ = [
     "OpenfdaInteractionError",
     "compute_pairwise_interactions",
+    "extract_spl_sections_for_display",
+    "fetch_openfda_label_for_medication",
     "fetch_openfda_label_for_term",
     "clear_openfda_cache_for_tests",
 ]

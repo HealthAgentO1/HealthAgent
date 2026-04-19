@@ -33,31 +33,44 @@ The **Medication Safety** page (`/medication-safety`, authenticated) supports:
 1. **Add prescription** — User enters free text describing what they take. The app calls **`POST /api/medication-profile/extract/`** with `medications_text`. The backend uses the DeepSeek-compatible LLM (`api/prompts/medication_extract_system.txt`) plus RxNorm resolution (`api/services/medication_extraction.py`) and returns structured medications. The client guides the user through optional regimen fields: **dosage (mg)**, **frequency**, **time to take**, and **refill** (how long before a refill is needed). Any field left blank is shown as **`-`** on the regimen list.
 2. **Persistence** — Regimen rows (name, optional fields, RxNorm id when known) are saved in the browser under **`localStorage` key `healthagent_active_regimen_v1`** (`frontend/src/medicationSafety/medicationRegimenStorage.ts`). Reloading the page keeps the list; clearing site data removes it. Each extract request still creates a **`MedicationProfile`** row on the server for auditing.
 3. **Detail** — `/medication-safety/med/:medicationId` allows editing the same optional fields and **removing** the drug after an in-app confirmation step.
+4. **Interaction conflicts (list page)** — When at least one medication is in the regimen, the SPA calls **`POST /api/medication/regimen-safety/`** with the regimen’s `name` and optional `rxnorm_id`, `scientific_name`, and `common_name` per row. The **pairwise** interaction hints (only) render in **`DrugInteractionConflictsPanel`** (`frontend/src/medicationSafety/DrugInteractionConflictsPanel.tsx`) when the API finds conflicting label wording between two drugs. **Per-drug** SPL excerpts and recalls render on **`MedicationSafetyDetailPage`** via **`MedicationDetailSafetyPanel`**. Regimen cards show a **!** badge when aggregated label/recall risk is **high** (boxed warning, contraindications, or Class I recall). This call requires authentication and does **not** persist a new `MedicationProfile` (the regimen itself remains browser-local).
 
-**API errors:** The extract endpoint returns **`{ "error": "..." }`** for LLM failures (typically HTTP **502**), configuration issues (**503**), or bad input (**400**). The UI surfaces these messages to the user.
+**API errors:** The extract endpoint returns **`{ "error": "..." }`** for LLM failures (typically HTTP **502**), configuration issues (**503**), or bad input (**400**). The regimen-safety endpoint returns **400** for an empty or invalid `medications` array, **401** if unauthenticated, and **502** if the safety pipeline raises unexpectedly. The UI surfaces these messages in the alerts panel when the regimen-safety request fails.
 
 ---
 
-## Agent Workflow (target)
+## Agent Workflow (implemented path for the SPA)
 
 ```
-User inputs medication list (free text or structured)
-    → DeepSeek (LLM) + RxNorm: NLP extraction → normalized drug names
-    → openFDA: interaction check, side effect lookup
-    → openFDA recalls: check for active recalls on any drug
-    → Risk scoring: classify severity (critical / moderate / low)
-    → If critical: alert provider/pharmacy
-    → Suggest safer alternatives for flagged interactions
-    → Store for ongoing monitoring
+User builds active regimen (localStorage) + optional LLM extract when adding a drug
+    → POST /api/medication/regimen-safety/ with { medications: [{ name, rxnorm_id? }] }
+    → openFDA drug/label.json: SPL sections per drug + pairwise interaction text scan
+    → openFDA enforcement: recalls per drug name
+    → Aggregate safety_score (low / moderate / high) from interaction severities + recalls
+    → Interaction alerts panel shows pairwise hints (severe / moderate / mild), label excerpts, recalls
 ```
 
-### Risk levels
+Full check with free text + persistence: **`POST /api/medication/check/`** runs LLM extraction, the same openFDA + recall pipeline, and stores a **`MedicationProfile`**.
 
-| Level | Criteria | Action |
-|-------|----------|--------|
-| Critical | Contraindicated combination or active recall | Immediate alert + provider notification |
-| Moderate | Known interaction requiring monitoring | In-app warning + suggestion |
-| Low | Minor interaction or informational flag | Informational note |
+### Pairwise interaction hint severity (FDA label text)
+
+Heuristic labels attached to each **positive** pairwise row in `interaction_results.pairwise[].severity`:
+
+| Severity | Typical cues in label excerpt |
+|----------|-------------------------------|
+| **severe** | Contraindicated, avoid concomitant use, life-threatening, fatal |
+| **moderate** | Increased risk, potentiation, serious bleeding, etc. |
+| **mild** | Monitor, caution, consider dose adjustment |
+
+Absence of a textual mention in section 7–style text does **not** prove safety.
+
+### Aggregate `safety_score.level`
+
+| Level | Meaning (automated) |
+|-------|---------------------|
+| **low** | Higher numeric score (fewer penalty factors from hints/recalls) |
+| **moderate** | Mid-range |
+| **high** | Lower numeric score (more interaction hints and/or recall matches) |
 
 ---
 
@@ -77,13 +90,15 @@ User inputs medication list (free text or structured)
 
 ### openFDA
 - Docs: https://open.fda.gov/
-- Used for: drug interactions, adverse events, recalls
+- Used for: SPL-derived **drug/label** text (boxed warnings, contraindications, adverse reactions, drug interactions, etc.), and **enforcement** recalls. Adverse **event** (FAERS) reports are not used in the current regimen UI.
+- **Label lookup order** (per medication): tokenize a **scientific** name (if present) and search `openfda.generic_name`, then the display `name` on `generic_name`, then **common** (brand) on `openfda.brand_name`, then display `name` on `brand_name`. The SPA sends `scientific_name` and `common_name` from the regimen when available (`POST /api/medication/regimen-safety/`).
 - Key endpoints:
-  - `GET /drug/label.json` — labeling, interactions, side effects
-  - `GET /drug/enforcement.json` — active recalls
-  - `GET /drug/event.json` — adverse event reports
+  - `GET /drug/label.json` — labeling; implementation in `api/services/openfda_interactions.py` (`fetch_openfda_label_for_medication`, `extract_spl_sections_for_display`, `compute_pairwise_interactions`)
+  - `GET /drug/enforcement.json` — active recalls (`api/services/openfda_recall_service.py`)
+  - `GET /drug/event.json` — optional future analytics (not wired to the alerts panel)
 - Auth: API key (optional, higher rate limits with key)
 - Rate limits: 240 requests/minute with key
+- Optional env: `OPENFDA_MAX_SECTION_CHARS` (default 6000) caps each SPL section string returned to clients.
 
 ---
 
@@ -109,17 +124,40 @@ class MedicationAlert(models.Model):
 
 ---
 
-## Alert Output Format
+## `interaction_results` shape (openFDA)
+
+`MedicationProfile.interaction_results` and **`POST /api/medication/regimen-safety/`** return a payload like:
 
 ```json
 {
-  "severity": "critical",
-  "type": "interaction",
-  "drugs_involved": ["warfarin", "aspirin"],
-  "description": "Increased bleeding risk when combined.",
-  "recommendation": "Consult prescriber before continuing both.",
-  "safer_alternatives": ["..."],
-  "sources": ["openFDA label: warfarin"]
+  "source": "openfda_drug_label",
+  "severity_scale": "…",
+  "pairwise": [
+    {
+      "drug_a": "Warfarin",
+      "drug_b": "Aspirin",
+      "has_interaction": true,
+      "severity": "moderate",
+      "description": "… excerpt from label …",
+      "direction": "FDA label (Warfarin) drug interactions section references Aspirin."
+    }
+  ],
+  "per_drug_label_safety": [
+    {
+      "drug": "Warfarin",
+      "search_term": "warfarin",
+      "label_query": { "field": "generic_name", "term": "warfarin" },
+      "label_found": true,
+      "sections": {
+        "boxed_warning": "…",
+        "adverse_reactions": "…",
+        "drug_interactions": "…"
+      },
+      "openfda": { "generic_name": ["warfarin"] }
+    }
+  ],
+  "per_drug_notes": [],
+  "pairs_checked": 1
 }
 ```
 

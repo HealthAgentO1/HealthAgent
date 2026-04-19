@@ -42,6 +42,7 @@ def run_medication_check(user, raw_text: str) -> dict[str, Any]:
                 "error": str(exc),
                 "pairwise": [],
                 "per_drug_notes": [],
+                "per_drug_label_safety": [],
                 "pairs_checked": 0,
             }
 
