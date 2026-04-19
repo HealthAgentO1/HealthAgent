@@ -11,6 +11,7 @@ from .views import (
     UserSymptomSessionRetrieveView,
     UserSymptomSessionsListView,
 )
+from .views_medication import MedicationProfileExtractView
 from .views_symptom import (
     SymptomChatView,
     SymptomNearbyFacilitiesView,
@@ -22,6 +23,11 @@ router.register(r"items", ExampleItemViewSet)
 router.register(r"symptom-sessions", SymptomSessionViewSet)
 
 urlpatterns = [
+    path(
+        "medication-profile/extract/",
+        MedicationProfileExtractView.as_view(),
+        name="medication-profile-extract",
+    ),
     path(
         "sessions/<uuid:session_public_id>/",
         UserSymptomSessionRetrieveView.as_view(),

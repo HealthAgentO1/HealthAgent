@@ -193,3 +193,6 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").strip().lower()
 
 # Budget for user+assistant turns sent to the model (tiktoken estimate); system prompt added on top.
 LLM_MAX_INPUT_TOKENS = int(os.environ.get("LLM_MAX_INPUT_TOKENS", "12000"))
+
+# NLM RxNav (no key) — resolves drug names to RxNorm RxCUIs when the LLM omits RxCUI.
+RXNAV_REST_BASE = os.environ.get("RXNAV_REST_BASE", "https://rxnav.nlm.nih.gov/REST").strip()
