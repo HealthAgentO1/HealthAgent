@@ -11,6 +11,7 @@ import {
   regimenIdentityFingerprint,
 } from "../medicationSafety/regimenSafetyCache";
 import { MedicationNameHeading } from "../medicationSafety/MedicationNameHeading";
+import { useAuth } from "../context/AuthContext";
 import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
 import type { ActiveMedication } from "../medicationSafety/types";
 
@@ -78,6 +79,7 @@ function RegimenCard({ med, showHighRiskBadge }: { med: ActiveMedication; showHi
 }
 
 const MedicationSafetyPage: React.FC = () => {
+  const { email } = useAuth();
   const [regimen, setRegimen] = useState<ActiveMedication[]>(() => loadActiveRegimen());
   const [addOpen, setAddOpen] = useState(false);
   const [safetyLoading, setSafetyLoading] = useState(false);
@@ -87,6 +89,10 @@ const MedicationSafetyPage: React.FC = () => {
   const refresh = useCallback(() => {
     setRegimen(loadActiveRegimen());
   }, []);
+
+  useEffect(() => {
+    setRegimen(loadActiveRegimen());
+  }, [email]);
 
   /** Identity-only: refetch openFDA when meds are added/removed or identity fields change — not dosage edits. */
   const regimenIdentityKey = useMemo(() => regimenIdentityFingerprint(regimen), [regimen]);

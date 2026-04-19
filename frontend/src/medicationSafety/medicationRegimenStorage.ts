@@ -1,7 +1,9 @@
+import { getStoredEmail } from "../api/authStorage";
 import type { ActiveMedication } from "./types";
 
-const STORAGE_KEY = "healthos_active_regimen_v1";
-const LEGACY_STORAGE_KEY = "healthagent_active_regimen_v1";
+/** Per signed-in user (email). Unscoped v1 keys are legacy only. */
+const STORAGE_PREFIX = "healthos_active_regimen_v2:";
+const LEGACY_UNSCOPED_KEYS = ["healthos_active_regimen_v1", "healthagent_active_regimen_v1"] as const;
 
 function isActiveMedication(x: unknown): x is ActiveMedication {
   if (!x || typeof x !== "object") return false;
@@ -28,32 +30,109 @@ function isActiveMedication(x: unknown): x is ActiveMedication {
   );
 }
 
+function normalizedAccountEmail(): string | null {
+  const e = getStoredEmail()?.trim().toLowerCase();
+  return e && e.length > 0 ? e : null;
+}
+
+function regimenStorageKeyForEmail(email: string): string {
+  return `${STORAGE_PREFIX}${email}`;
+}
+
+/** True if another local account (different email bucket) already has saved meds. */
+function otherAccountsHaveRegimenData(currentEmail: string): boolean {
+  const currentKey = regimenStorageKeyForEmail(currentEmail);
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith(STORAGE_PREFIX) || k === currentKey) continue;
+    const raw = localStorage.getItem(k);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) continue;
+      const meds = parsed.filter(isActiveMedication);
+      if (meds.length > 0) return true;
+    } catch {
+      /* ignore */
+    }
+  }
+  return false;
+}
+
+function removeLegacyUnscopedKeys(): void {
+  for (const lk of LEGACY_UNSCOPED_KEYS) {
+    localStorage.removeItem(lk);
+  }
+}
+
+/**
+ * Old builds stored one regimen for the whole browser. Migrate into the current account only
+ * when no other account already has isolated data (avoids assigning shared data to the wrong user).
+ */
+function migrateLegacyUnscopedIfAppropriate(targetKey: string, currentEmail: string): void {
+  if (otherAccountsHaveRegimenData(currentEmail)) {
+    removeLegacyUnscopedKeys();
+    return;
+  }
+  for (const lk of LEGACY_UNSCOPED_KEYS) {
+    const raw = localStorage.getItem(lk);
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed)) {
+        localStorage.removeItem(lk);
+        continue;
+      }
+      const meds = parsed.filter(isActiveMedication).map((m) => ({
+        ...m,
+        commonName: m.commonName ?? null,
+        scientificName: m.scientificName ?? null,
+      }));
+      if (meds.length === 0) {
+        localStorage.removeItem(lk);
+        continue;
+      }
+      localStorage.setItem(targetKey, JSON.stringify(meds));
+      removeLegacyUnscopedKeys();
+      return;
+    } catch {
+      localStorage.removeItem(lk);
+    }
+  }
+}
+
+function parseRegimenRaw(raw: string): ActiveMedication[] {
+  const parsed = JSON.parse(raw) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(isActiveMedication).map((m) => ({
+    ...m,
+    commonName: m.commonName ?? null,
+    scientificName: m.scientificName ?? null,
+  }));
+}
+
 export function loadActiveRegimen(): ActiveMedication[] {
   try {
-    let raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (raw) {
-        localStorage.setItem(STORAGE_KEY, raw);
-        localStorage.removeItem(LEGACY_STORAGE_KEY);
-      }
-    }
+    const email = normalizedAccountEmail();
+    if (!email) return [];
+
+    const key = regimenStorageKeyForEmail(email);
+    migrateLegacyUnscopedIfAppropriate(key, email);
+
+    const raw = localStorage.getItem(key);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isActiveMedication).map((m) => ({
-      ...m,
-      commonName: m.commonName ?? null,
-      scientificName: m.scientificName ?? null,
-    }));
+    return parseRegimenRaw(raw);
   } catch {
     return [];
   }
 }
 
 export function saveActiveRegimen(meds: ActiveMedication[]): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(meds));
-  localStorage.removeItem(LEGACY_STORAGE_KEY);
+  const email = normalizedAccountEmail();
+  if (!email) return;
+  const key = regimenStorageKeyForEmail(email);
+  localStorage.setItem(key, JSON.stringify(meds));
+  removeLegacyUnscopedKeys();
 }
 
 export function upsertMedication(med: ActiveMedication): void {
