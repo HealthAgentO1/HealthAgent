@@ -39,6 +39,8 @@ export interface SymptomSessionListItem {
   triage_level: string | null;
   created_at: string;
   summary: string;
+  /** Present when the symptom interview produced a structured handoff (survey or chat). */
+  pre_visit_report: Record<string, unknown> | null;
 }
 
 /** `GET /sessions/<uuid>/` — hydrate Symptom Check from a saved server session */
