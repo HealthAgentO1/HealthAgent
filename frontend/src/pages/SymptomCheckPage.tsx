@@ -1,7 +1,7 @@
 /**
- * Symptom Check: three-step flow. Steps 2–3 call Django `POST /api/symptom/survey-llm/`
- * via `symptomLlmClient` (JWT on `apiClient`). Step 3 loads nearby facilities from
- * `POST /api/symptom/nearby-facilities/` (NPPES + Census geocoding via Django).
+ * Symptom Check: guided flow with an optional welcome landing on step 1, then the intake form.
+ * Steps 2–3 call Django `POST /api/symptom/survey-llm/` via `symptomLlmClient` (JWT on `apiClient`).
+ * Step 3 loads nearby facilities from `POST /api/symptom/nearby-facilities/` (NPPES + Census geocoding via Django).
  *
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
@@ -170,10 +170,20 @@ function scrollAppToTop(): void {
   requestAnimationFrame(run);
 }
 
+/** Step 1 welcome vs questionnaire form (not persisted; URL session and resume skip welcome). */
+type IntakeSubstep = "welcome" | "form";
+
+function initialIntakeSubstepFromLocation(): IntakeSubstep {
+  if (typeof window === "undefined") return "welcome";
+  if (new URLSearchParams(window.location.search).get("session")?.trim()) return "form";
+  return "welcome";
+}
+
 const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<SymptomCheckFlowStep>("intake");
+  const [intakeSubstep, setIntakeSubstep] = useState<IntakeSubstep>(initialIntakeSubstepFromLocation);
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
   /** Step 1: practice location for NPPES distance ranking (mirrored to `symptomCheckSession`). */
@@ -277,6 +287,7 @@ const SymptomCheckPage: React.FC = () => {
           } catch {
             setLlmError("Could not restore follow-up questions from this session.");
             setStep("intake");
+            setIntakeSubstep("form");
             setFollowUpQuestions([]);
             setFollowUpAnswers({});
           }
@@ -291,18 +302,21 @@ const SymptomCheckPage: React.FC = () => {
           } catch {
             setLlmError("Could not restore results from this session.");
             setStep("intake");
+            setIntakeSubstep("form");
           }
         } else if (data.resume_step === "chat") {
           setFollowUpQuestions([]);
           setFollowUpAnswers({});
           setResults(null);
           setStep("intake");
+          setIntakeSubstep("form");
           setResumeChatNotice(true);
         } else {
           setFollowUpQuestions([]);
           setFollowUpAnswers({});
           setResults(null);
           setStep("intake");
+          setIntakeSubstep("form");
         }
 
         setSearchParams(
@@ -321,6 +335,7 @@ const SymptomCheckPage: React.FC = () => {
               : "Unable to load this session. Try again from the dashboard.",
           );
           setStep("intake");
+          setIntakeSubstep("form");
         }
       } finally {
         if (!cancelled) setUrlSessionHydrating(false);
@@ -490,7 +505,7 @@ const SymptomCheckPage: React.FC = () => {
   /** App content scrolls inside `Layout`’s `<main>`; reset both so each flow step starts at the top. */
   useEffect(() => {
     scrollAppToTop();
-  }, [step]);
+  }, [step, intakeSubstep]);
 
   // Mirror flow state to localStorage whenever the user is past the resume gate.
   useEffect(() => {
@@ -616,6 +631,7 @@ const SymptomCheckPage: React.FC = () => {
     setLlmError(snap.llmError);
     setSurveyBackendSessionId(snap.surveyBackendSessionId);
     setPendingRequest(null);
+    setIntakeSubstep("form");
   };
 
   /** Restore saved answers and optionally replay the in-flight LLM call from the saved phase. */
@@ -672,6 +688,7 @@ const SymptomCheckPage: React.FC = () => {
     setSurveyBackendSessionId(null);
     setResumeChatNotice(false);
     setSessionGate("ready");
+    setIntakeSubstep("welcome");
   };
 
   const restart = () => {
@@ -693,6 +710,7 @@ const SymptomCheckPage: React.FC = () => {
     setSurveyBackendSessionId(null);
     setResumeChatNotice(false);
     setResultsEntered(false);
+    setIntakeSubstep("welcome");
   };
 
   useEffect(() => {
@@ -1162,9 +1180,19 @@ const SymptomCheckPage: React.FC = () => {
               Symptom Check
             </h1>
             <p className="text-on-surface-variant font-body text-base max-w-2xl">
-              Answer a short questionnaire about what you are experiencing. We use your responses
-              to highlight possible next steps, nearby facilities, and illustrative price ranges tied
-              to the insurer you select—not a personal quote.
+              {step === "intake" && intakeSubstep === "welcome" ? (
+                <>
+                  Review what this guided check covers, then continue to the questionnaire when you
+                  are ready. After you begin filling it out, progress can be saved in this browser so you
+                  can resume if you leave mid-check.
+                </>
+              ) : (
+                <>
+                  Answer a short questionnaire about what you are experiencing. We use your responses
+                  to highlight possible next steps, nearby facilities, and illustrative price ranges tied
+                  to the insurer you select—not a personal quote.
+                </>
+              )}
             </p>
           </div>
           <div
@@ -1176,7 +1204,7 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         </header>
 
-        {resumeChatNotice && step === "intake" ? (
+        {resumeChatNotice && step === "intake" && intakeSubstep === "form" ? (
           <div
             className="mb-8 rounded-xl border border-primary/30 bg-primary-fixed/10 px-4 py-4 md:px-6 md:py-5 flex flex-col sm:flex-row sm:items-center gap-4"
             role="status"
@@ -1198,7 +1226,84 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         ) : null}
 
-        {step === "intake" && (
+        {step === "intake" && intakeSubstep === "welcome" ? (
+          <section className="relative overflow-hidden rounded-xl border-ghost bg-surface-container-lowest p-6 shadow-ambient md:p-8">
+            <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-secondary/10 blur-2xl" />
+            <div className="relative z-10">
+              <h2 className="mb-3 flex items-center gap-2 font-headline text-xl font-bold text-primary">
+                <span className="material-symbols-outlined text-secondary">waving_hand</span>
+                Welcome to Symptom Check
+              </h2>
+              <p className="mb-6 max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant md:text-base">
+                This is a structured, three-part guided assessment—not a diagnosis and not emergency
+                triage. It helps you organize what you are experiencing so you can discuss it with a
+                clinician or care team.
+              </p>
+              <ul className="mb-8 space-y-4 font-body text-sm text-on-surface md:text-base">
+                <li className="flex gap-3">
+                  <span
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-fixed/40 font-headline text-sm font-bold text-primary"
+                    aria-hidden
+                  >
+                    1
+                  </span>
+                  <div>
+                    <p className="font-headline font-semibold text-on-surface">Tell us the basics</p>
+                    <p className="mt-1 leading-relaxed text-on-surface-variant">
+                      Describe your symptoms, choose an insurer for illustrative cost context, and enter
+                      a US address so we can rank nearby facilities from the public NPI directory.
+                    </p>
+                  </div>
+                </li>
+                <li className="flex gap-3">
+                  <span
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-fixed/40 font-headline text-sm font-bold text-primary"
+                    aria-hidden
+                  >
+                    2
+                  </span>
+                  <div>
+                    <p className="font-headline font-semibold text-on-surface">Answer tailored questions</p>
+                    <p className="mt-1 leading-relaxed text-on-surface-variant">
+                      We generate follow-up questions from your description (similar to what a clinician
+                      might ask next). You may see one or two short rounds before results.
+                    </p>
+                  </div>
+                </li>
+                <li className="flex gap-3">
+                  <span
+                    className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary-fixed/40 font-headline text-sm font-bold text-primary"
+                    aria-hidden
+                  >
+                    3
+                  </span>
+                  <div>
+                    <p className="font-headline font-semibold text-on-surface">Review illustrative results</p>
+                    <p className="mt-1 leading-relaxed text-on-surface-variant">
+                      You will see possible conditions for discussion only, nearby hospital-style listings,
+                      and general price context—not a personal quote or medical decision.
+                    </p>
+                  </div>
+                </li>
+              </ul>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <button
+                  className="cursor-pointer gradient-primary flex items-center justify-center gap-2 rounded-lg px-8 py-3 font-headline text-sm font-semibold text-on-primary shadow-ambient transition-all hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)]"
+                  type="button"
+                  onClick={() => {
+                    setIntakeSubstep("form");
+                    scrollAppToTop();
+                  }}
+                >
+                  Continue to questionnaire
+                  <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {step === "intake" && intakeSubstep === "form" ? (
           <section
             className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden transition-opacity duration-300 ease-out ${
               followUpLoading ? "opacity-60 pointer-events-none" : "opacity-100"
@@ -1471,7 +1576,7 @@ const SymptomCheckPage: React.FC = () => {
               </div>
             </div>
           </section>
-        )}
+        ) : null}
 
         {step === "followup" && (
           <div className="space-y-6">
@@ -1519,6 +1624,7 @@ const SymptomCheckPage: React.FC = () => {
                     type="button"
                     onClick={() => {
                       setStep("intake");
+                      setIntakeSubstep("form");
                       setFollowUpQuestions([]);
                       setFollowUpAnswers({});
                       setSecondFollowUpQuestions([]);
