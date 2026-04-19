@@ -27,14 +27,16 @@ const Sidebar: React.FC = () => {
     <aside className="hidden md:flex h-screen w-72 bg-surface-container-low flex-col py-8 px-4 gap-y-2 shrink-0">
       {/* Brand */}
       <div className="px-4 mb-8 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg gradient-primary flex items-center justify-center shadow-[0_4px_12px_rgba(0,55,111,0.2)]">
-          <span className="material-symbols-outlined text-on-primary icon-fill">
-            health_and_safety
-          </span>
-        </div>
+        <img
+          src="/icon.png"
+          alt=""
+          width={40}
+          height={40}
+          className="w-10 h-10 rounded-lg object-contain shadow-[0_4px_12px_rgba(24,28,32,0.12)] shrink-0"
+        />
         <div>
           <h1 className="text-lg font-extrabold text-primary font-headline tracking-tight leading-none">
-            Health Guardian
+            HealthOS
           </h1>
           <p className="text-xs text-on-surface-variant font-medium mt-1">
             Clinical Sanctuary
@@ -97,7 +99,16 @@ const Sidebar: React.FC = () => {
 
       {/* Emergency CTA */}
       <div className="mt-auto px-2">
-        <button className="w-full py-3 px-4 rounded-lg bg-error-container text-on-error-container font-headline font-semibold flex items-center justify-center gap-2 hover:bg-[#ffcdc8] transition-colors border border-error-container/50">
+        <NavLink
+          to="/emergency"
+          className={({ isActive }) =>
+            `w-full py-3 px-4 rounded-lg font-headline font-semibold flex items-center justify-center gap-2 transition-colors border ${
+              isActive
+                ? "bg-error text-on-error border-error shadow-sm"
+                : "bg-error-container text-on-error-container hover:bg-[#ffcdc8] border-error-container/50"
+            }`
+          }
+        >
           <span
             className="material-symbols-outlined text-lg"
             style={{ fontVariationSettings: "'FILL' 1" }}
@@ -105,7 +116,7 @@ const Sidebar: React.FC = () => {
             emergency
           </span>
           Emergency Contact
-        </button>
+        </NavLink>
       </div>
     </aside>
   );
