@@ -9,12 +9,14 @@
 import axios from "axios";
 import followupContext from "./prompts/followup_context.txt?raw";
 import followupRound2Context from "./prompts/followup_round2_context.txt?raw";
+import priceEstimateContext from "./prompts/price_estimate_context.txt?raw";
 import resultsContext from "./prompts/results_context.txt?raw";
 import { apiClient } from "../api/client";
 import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
 import { parseJsonObjectFromLlm } from "./parseLlmJson";
 import {
   validateFollowUpQuestionsPayload,
+  validatePriceEstimatePayload,
   validateSymptomResultsPayload,
 } from "./validatePayloads";
 import type {
@@ -23,7 +25,47 @@ import type {
   SymptomLlmPhase,
   SymptomLlmRequestBody,
   SymptomResultsPayload,
+  PriceEstimatePayload,
 } from "./types";
+
+const SEVERITY_RANK: Record<"mild" | "moderate" | "severe", number> = {
+  mild: 0,
+  moderate: 1,
+  severe: 2,
+};
+
+function highestConditionSeverity(
+  conditions: SymptomResultsPayload["conditions"],
+): "mild" | "moderate" | "severe" {
+  let best: "mild" | "moderate" | "severe" = "mild";
+  let rank = -1;
+  for (const c of conditions) {
+    const r = SEVERITY_RANK[c.condition_severity];
+    if (r > rank) {
+      rank = r;
+      best = c.condition_severity;
+    }
+  }
+  return best;
+}
+
+const ROUTING_RATIONALE_MAX = 500;
+
+function buildSeverityRoutingPayload(results: SymptomResultsPayload) {
+  const leading = results.conditions[0];
+  const rat = results.care_taxonomy.rationale_for_routing;
+  const truncated =
+    rat.length > ROUTING_RATIONALE_MAX ? `${rat.slice(0, ROUTING_RATIONALE_MAX)}…` : rat;
+  return {
+    overall_patient_severity: results.overall_patient_severity,
+    highest_severity_on_differential: highestConditionSeverity(results.conditions),
+    leading_condition: leading
+      ? { title: leading.title, condition_severity: leading.condition_severity }
+      : null,
+    suggested_care_setting: results.care_taxonomy.suggested_care_setting,
+    routing_rationale: truncated,
+  };
+}
 
 /** Relative to `VITE_API_URL` (e.g. `http://127.0.0.1:8000/api`). */
 const SURVEY_LLM_PATH = "symptom/survey-llm/";
@@ -160,9 +202,43 @@ export async function requestConditionAssessment(input: {
   return validateSymptomResultsPayload(parsed);
 }
 
+/** After condition assessment + optional NPPES list: illustrative cost narrative (not a quote). */
+export async function requestPriceEstimate(input: {
+  insuranceLabel: string;
+  /** Full assessment: severities + `care_taxonomy` drive visit-type cost tier. */
+  results: SymptomResultsPayload;
+  /** Top-ranked nearby facility when the NPPES call returned at least one row; otherwise null. */
+  topFacility: { npi: string; name: string; address_line: string } | null;
+  sessionId: string;
+}): Promise<PriceEstimatePayload> {
+  const { results } = input;
+  const body: SymptomLlmRequestBody = {
+    phase: "price_estimate_context",
+    system_prompt: priceEstimateContext.trim(),
+    user_payload: {
+      insurance_label: input.insuranceLabel.trim() || "Not specified",
+      possible_conditions: results.conditions.map((c) => ({
+        title: c.title,
+        explanation: c.explanation,
+        why_possible: c.why_possible,
+        condition_severity: c.condition_severity,
+      })),
+      severity_and_routing: buildSeverityRoutingPayload(results),
+      /** Top NPPES site for setting context only; not the user's insurance payer. */
+      referenced_facility: input.topFacility,
+    },
+    session_id: input.sessionId,
+  };
+
+  const res = await postSymptomSurveyLlm(body);
+  const parsed = parseJsonObjectFromLlm(res.raw_text);
+  return validatePriceEstimatePayload(parsed);
+}
+
 export type {
   FollowUpQuestionsPayload,
   FollowUpQuestionsWithSession,
   SymptomResultsPayload,
   SymptomLlmPhase,
+  PriceEstimatePayload,
 };

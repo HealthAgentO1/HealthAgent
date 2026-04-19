@@ -129,3 +129,64 @@ class SymptomSurveyLlmApiTests(APITestCase):
         session = SymptomSession.objects.get(public_id=sid)
         self.assertEqual(session.pre_visit_report["chief_complaint"], "Headache for two days.")
         mock_report.assert_called_once_with(session)
+
+    @patch("api.views_symptom.complete_symptom_survey_turn")
+    def test_price_estimate_context_reuses_session(self, mock_complete):
+        mock_complete.side_effect = [
+            '{"questions":[]}',
+            '{"cost_range_label":"~$100–$600","cost_range_explanation":"Broad primary-care style band before plan; not your price."}',
+        ]
+        r1 = self.client.post(
+            self.url,
+            {
+                "phase": "followup_questions",
+                "system_prompt": "sys",
+                "user_payload": {"symptoms": "headache", "insurance_label": "Test"},
+            },
+            format="json",
+        )
+        self.assertEqual(r1.status_code, status.HTTP_200_OK)
+        sid = r1.data["session_id"]
+
+        r2 = self.client.post(
+            self.url,
+            {
+                "phase": "price_estimate_context",
+                "system_prompt": "sys",
+                "user_payload": {
+                    "insurance_label": "Test",
+                    "possible_conditions": [
+                        {
+                            "title": "Tension headache",
+                            "explanation": "Common benign headache pattern.",
+                            "why_possible": "Stress and poor sleep reported.",
+                            "condition_severity": "mild",
+                        }
+                    ],
+                    "severity_and_routing": {
+                        "overall_patient_severity": "mild",
+                        "highest_severity_on_differential": "mild",
+                        "leading_condition": {
+                            "title": "Tension headache",
+                            "condition_severity": "mild",
+                        },
+                        "suggested_care_setting": "primary_care",
+                        "routing_rationale": "Stable pattern; outpatient evaluation.",
+                    },
+                    "referenced_facility": None,
+                },
+                "session_id": sid,
+            },
+            format="json",
+        )
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+        self.assertEqual(r2.data["session_id"], sid)
+        self.assertEqual(r2.data["phase"], "price_estimate_context")
+        self.assertIn("cost_range_label", r2.data["raw_text"])
+        session = SymptomSession.objects.get(public_id=sid)
+        phases = [
+            e.get("phase")
+            for e in (session.ai_conversation_log or [])
+            if e.get("role") == "survey_turn"
+        ]
+        self.assertEqual(phases, ["followup_questions", "price_estimate_context"])
