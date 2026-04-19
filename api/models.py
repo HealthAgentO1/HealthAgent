@@ -50,6 +50,9 @@ class SymptomSession(models.Model):
     )
     confirmation_number = models.CharField(max_length=20, null=True, blank=True)
     pre_visit_report = models.JSONField(null=True, blank=True)
+    # After a visit, the patient may record the clinician-assigned diagnosis (see post-visit PATCH).
+    # JSON shape: {"text": str, "source": "llm_condition"|"custom", "matched_condition_title": str|None}
+    post_visit_diagnosis = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

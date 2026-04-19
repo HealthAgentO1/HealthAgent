@@ -56,6 +56,8 @@ class SymptomSessionsListApiTests(APITestCase):
         )
         self.assertEqual(res.data[1]["session_id"], str(older.public_id))
         self.assertEqual(res.data[1]["summary"], "Mild cough.")
+        self.assertIsNone(res.data[0].get("post_visit_diagnosis"))
+        self.assertIsNone(res.data[1].get("post_visit_diagnosis"))
 
     def test_does_not_include_other_users_sessions(self):
         SymptomSession.objects.create(user=self.other, triage_level="emergency")

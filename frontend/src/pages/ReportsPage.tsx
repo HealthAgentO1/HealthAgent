@@ -8,6 +8,7 @@ import {
 import { patientCheckListLabel } from "../utils/sessionShortTitle";
 import { triageBadgeClasses, triageNoteBubbleClasses } from "../utils/triageSeverityStyles";
 import { scrollAppToTop } from "../utils/scrollAppToTop";
+import { parsePostVisitDiagnosis } from "../symptomCheck/postVisitDiagnosisTypes";
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -103,6 +104,9 @@ const ReportsPage: React.FC = () => {
   const patientView = selected
     ? buildPatientFriendlyPreVisit(selected.pre_visit_report ?? undefined)
     : null;
+  const postVisitDx = selected
+    ? parsePostVisitDiagnosis(selected.post_visit_diagnosis ?? null)
+    : null;
 
   const selectSession = useCallback(
     (id: string) => {
@@ -177,7 +181,7 @@ const ReportsPage: React.FC = () => {
             >
               <div className="px-4 py-3 border-b border-outline-variant/20 bg-surface-container-low/80">
                 <p className="font-headline text-xs font-bold uppercase tracking-wider text-on-surface-variant">
-                  Past checks ({ordered.length})
+                  Drafts — past checks ({ordered.length})
                 </p>
               </div>
               <ul className="max-h-[min(70vh,520px)] overflow-y-auto divide-y divide-outline-variant/15">
@@ -251,6 +255,29 @@ const ReportsPage: React.FC = () => {
                       </Link>
                     </div>
                   </div>
+
+                  {postVisitDx ? (
+                    <section
+                      aria-labelledby="reports-post-visit-dx"
+                      className="mt-6 rounded-xl border border-secondary/30 bg-secondary-container/15 p-5 md:p-6"
+                    >
+                      <h3
+                        id="reports-post-visit-dx"
+                        className="font-headline text-sm font-bold uppercase tracking-wider text-secondary mb-2"
+                      >
+                        Post-visit Diagnosis
+                      </h3>
+                      <p className="font-body text-sm text-on-surface leading-relaxed">{postVisitDx.text}</p>
+                      {postVisitDx.source === "llm_condition" && postVisitDx.matched_condition_title ? (
+                        <p className="font-body text-xs text-on-surface-variant mt-2">
+                          Matched illustrative condition:{" "}
+                          <span className="font-medium text-on-surface">
+                            {postVisitDx.matched_condition_title}
+                          </span>
+                        </p>
+                      ) : null}
+                    </section>
+                  ) : null}
 
                   {!patientView ? (
                     <div className="mt-6 rounded-lg border border-dashed border-outline-variant/40 bg-surface-container-low/50 p-5">

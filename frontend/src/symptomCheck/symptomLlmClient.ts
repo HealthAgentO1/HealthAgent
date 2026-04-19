@@ -117,17 +117,27 @@ export async function requestFollowUpQuestions(input: {
   symptoms: string;
   insuranceLabel: string;
   practiceLocation?: PracticeLocationPayload | null;
+  /**
+   * Optional: official diagnoses the user recorded after past visits (`SymptomSession.post_visit_diagnosis`).
+   * Only sent when the user opts in on step 1 so the model can weigh chronic / historical context.
+   */
+  priorOfficialDiagnoses?: string[];
 }): Promise<FollowUpQuestionsWithSession> {
+  const userPayload: Record<string, unknown> = {
+    symptoms: input.symptoms,
+    insurance_label: input.insuranceLabel,
+  };
+  if (input.priorOfficialDiagnoses && input.priorOfficialDiagnoses.length > 0) {
+    userPayload.prior_official_diagnoses = input.priorOfficialDiagnoses;
+  }
+  if (input.practiceLocation) {
+    userPayload.practice_location = input.practiceLocation;
+  }
+
   const body: SymptomLlmRequestBody = {
     phase: "followup_questions",
     system_prompt: followupContext.trim(),
-    user_payload: {
-      symptoms: input.symptoms,
-      insurance_label: input.insuranceLabel,
-      ...(input.practiceLocation
-        ? { practice_location: input.practiceLocation }
-        : {}),
-    },
+    user_payload: userPayload,
   };
 
   const res = await postSymptomSurveyLlm(body);
