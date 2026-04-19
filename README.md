@@ -20,6 +20,14 @@ AI-assisted triage, care routing, and medication monitoring — backed by a Djan
 
 ---
 
+## Project description
+
+**Problem.** People with new or changing symptoms often lack a straightforward way to judge how urgently they need care, which setting is appropriate, and how to find and prepare for a visit. Separately, keeping an accurate medication picture and sharing the right context with a clinician is easy to get wrong. The result is unnecessary friction from first symptoms through booking and the clinical encounter.
+
+**What we are building.** HealthOS addresses that gap with structured, AI-assisted **symptom-to-care** (educational triage-style guidance, routing hooks, and pre-visit summaries) and **medication safety** (regimen tracking and interaction-oriented checks). The product aims to reduce friction on the path from symptoms to appropriate care and safer medication use — not to replace emergency services, definitive diagnosis, or the clinician–patient relationship.
+
+---
+
 ## Overview
 
 HealthOS combines two complementary flows:
@@ -38,6 +46,8 @@ The stack is a **Django REST** backend with **PostgreSQL**, a **DeepSeek**-hoste
 ### Symptom-to-care
 
 - **Guided intake** — Structured symptom narrative, insurer context, and LLM-assisted follow-up questions.
+- **Prior diagnoses for the LLM** — Optional context from **My prior diagnoses** and official labels saved after past symptom checks; when enabled on intake, deduplicated diagnosis text is sent to the first survey LLM call (`prior_official_diagnoses`) so follow-up questions and assessment can account for documented history.
+- **Post-visit doctor diagnosis** — On completed checks, record the clinician’s official diagnosis after a visit (including post-operative follow-up when that is what was documented) as **post-visit diagnosis**, so it appears on Reports and can be reused as prior context on future symptom checks.
 - **Triage-style output** — Severity and urgency framing with educational (non-diagnostic) language.
 - **Care routing** — Suggested care settings and taxonomy-aware routing hooks (e.g. NUCC-aligned facility search via **NPPES**).
 - **Provider & facility discovery** — Search and map-style workflows for nearby care options where integrated.
