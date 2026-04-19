@@ -9,11 +9,18 @@ import {
 } from "react";
 import {
   registerAndSignIn,
+  refreshAccessToken,
   signIn,
   signOut,
   type RegisterPayload,
 } from "../api/auth";
-import { getAccessToken, getStoredEmail } from "../api/authStorage";
+import {
+  clearAuthSession,
+  getAccessToken,
+  getRefreshToken,
+  getStoredEmail,
+} from "../api/authStorage";
+import { isAccessTokenValid } from "../utils/jwtAccess";
 
 type AuthContextValue = {
   isAuthenticated: boolean;
@@ -31,12 +38,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (getAccessToken()) {
-      setEmail(getStoredEmail());
-    } else {
-      setEmail(null);
+    let cancelled = false;
+
+    async function bootstrap() {
+      const access = getAccessToken();
+      const refresh = getRefreshToken();
+
+      if (!access) {
+        if (!cancelled) {
+          setEmail(null);
+          setReady(true);
+        }
+        return;
+      }
+
+      if (isAccessTokenValid(access)) {
+        if (!cancelled) {
+          setEmail(getStoredEmail());
+          setReady(true);
+        }
+        return;
+      }
+
+      if (refresh) {
+        const newAccess = await refreshAccessToken();
+        if (cancelled) return;
+        if (newAccess) {
+          setEmail(getStoredEmail());
+        } else {
+          setEmail(null);
+        }
+      } else {
+        clearAuthSession();
+        if (!cancelled) setEmail(null);
+      }
+      if (!cancelled) setReady(true);
     }
-    setReady(true);
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = useCallback(async (e: string, password: string) => {
@@ -56,6 +98,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo(() => {
     const token = typeof window !== "undefined" ? getAccessToken() : null;
+    // After bootstrap, a stored token is either valid or freshly refreshed; mid-session
+    // expiry is handled by the apiClient 401 interceptor (refresh or logout).
     return {
       isAuthenticated: ready && !!token,
       email: email ?? getStoredEmail(),

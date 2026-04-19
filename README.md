@@ -53,7 +53,7 @@ The stack is a **Django REST** backend with **PostgreSQL**, a **DeepSeek**-hoste
 
 ### Account & app shell
 
-- **JWT authentication** — Register, login, access, and refresh tokens (`djangorestframework-simplejwt`).
+- **JWT authentication** — Register, login, access, and refresh tokens (`djangorestframework-simplejwt`). The SPA **`AuthProvider`** validates access token **expiry** on load and refreshes or clears the session before treating the user as signed in (see `docs/architecture.md`).
 - **Dashboard** — Care pathway prompts, health snapshot (symptoms + meds), and recent session history.
 - **Emergency contacts** — Dedicated area for critical contact information.
 - **Reports** — Workspace for exports and report-related flows tied to the symptom journey.

@@ -9,6 +9,24 @@ logger = logging.getLogger(__name__)
 # NPPES API base URL
 NPPES_API_BASE = "https://npiregistry.cms.hhs.gov/api/"
 
+
+def _looks_like_nucc_taxonomy_code(value: str) -> bool:
+    """
+    Heuristic: NUCC Healthcare Provider Taxonomy codes are 10 characters, start with three
+    digits, and include at least one letter (e.g. 207Q00000X, 261QU0200X).
+
+    CMS NPI Registry Read API v2.1 documents ``taxonomy_description`` for searching by
+    description text. The same API accepts ``taxonomy_code`` for code-based search; passing
+    a raw code via ``taxonomy_description`` returns error 14 (no matching taxonomy).
+    """
+    s = value.strip()
+    if len(s) != 10:
+        return False
+    if not re.match(r"^[0-9]{3}[0-9A-Za-z]{7}$", s):
+        return False
+    return bool(re.search(r"[A-Za-z]", s))
+
+
 class NPPESService:
     """Service for interacting with the CMS NPI Registry (NPPES) API."""
 
@@ -32,13 +50,10 @@ class NPPESService:
         }
 
         if specialty:
-            # Try to determine if it's a taxonomy code or description
-            if re.match(r'^\d{10}X?$', specialty):
-                # Looks like a taxonomy code
-                params["taxonomy_description"] = specialty
+            if _looks_like_nucc_taxonomy_code(specialty):
+                params["taxonomy_code"] = specialty.strip().upper()
             else:
-                # Assume it's a description
-                params["taxonomy_description"] = specialty
+                params["taxonomy_description"] = specialty.strip()
 
         try:
             response = requests.get(NPPES_API_BASE, params=params, timeout=10)

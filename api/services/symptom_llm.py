@@ -166,6 +166,103 @@ def run_symptom_turn(system_prompt: str, chat_messages: list[dict[str, str]]) ->
     return parse_symptom_response(raw)
 
 
+# Bundled next to other API prompts (`api/prompts/survey/`); keep in sync with SPA copies in
+# ``frontend/src/symptomCheck/prompts/`` when prompts change.
+_SURVEY_PHASE_TO_PROMPT_FILE: dict[str, str] = {
+    "followup_questions": "followup_context.txt",
+    "followup_questions_round_2": "followup_round2_context.txt",
+    "condition_assessment": "results_context.txt",
+    "price_estimate_context": "price_estimate_context.txt",
+}
+
+
+def _survey_prompts_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "prompts" / "survey"
+
+
+@lru_cache(maxsize=16)
+def get_survey_system_prompt_for_phase(phase: str) -> str:
+    """
+    Server-side Symptom Check system instructions keyed by survey phase. Used when
+    ``settings.SYMPTOM_SURVEY_USE_SERVER_PROMPTS`` is True.
+    """
+    name = _SURVEY_PHASE_TO_PROMPT_FILE.get(phase)
+    if not name:
+        raise ValueError(f"Unknown survey phase: {phase!r}")
+    path = _survey_prompts_dir() / name
+    if not path.is_file():
+        raise RuntimeError(f"Survey prompt file missing: {name}")
+    return path.read_text(encoding="utf-8").strip()
+
+
+def llm_transport_error_types() -> tuple[type[BaseException], ...]:
+    """Exception types that usually indicate network/timeout to the LLM provider."""
+    out: list[type[BaseException]] = []
+    try:
+        from openai import APIConnectionError, APITimeoutError
+
+        out.extend([APIConnectionError, APITimeoutError])
+    except ImportError:
+        pass
+    try:
+        import anthropic
+
+        ac = getattr(anthropic, "APIConnectionError", None)
+        if ac is not None:
+            out.append(ac)
+    except ImportError:
+        pass
+    return tuple(out)
+
+
+def llm_rate_limit_error_types() -> tuple[type[BaseException], ...]:
+    out: list[type[BaseException]] = []
+    try:
+        from openai import RateLimitError
+
+        out.append(RateLimitError)
+    except ImportError:
+        pass
+    try:
+        import anthropic
+
+        rl = getattr(anthropic, "RateLimitError", None)
+        if rl is not None:
+            out.append(rl)
+    except ImportError:
+        pass
+    return tuple(out)
+
+
+def classify_survey_llm_exception(exc: BaseException) -> str:
+    """
+    Categorize failures from ``complete_symptom_survey_turn`` / LLM HTTP clients for HTTP mapping.
+    Returns one of: rate_limit, transport, api_error, unknown.
+    """
+    rt = llm_rate_limit_error_types()
+    if rt and isinstance(exc, rt):
+        return "rate_limit"
+    tt = llm_transport_error_types()
+    if tt and isinstance(exc, tt):
+        return "transport"
+    try:
+        from openai import APIError as OpenAIAPIError
+
+        if isinstance(exc, OpenAIAPIError):
+            return "api_error"
+    except ImportError:
+        pass
+    try:
+        import anthropic
+
+        APIE = getattr(anthropic, "APIError", None)
+        if APIE is not None and isinstance(exc, APIE):
+            return "api_error"
+    except ImportError:
+        pass
+    return "unknown"
+
+
 def complete_symptom_survey_turn(system_prompt: str, user_payload: dict[str, Any]) -> str:
     """
     Symptom Check survey: one user message containing JSON `user_payload`, arbitrary system prompt

@@ -38,6 +38,8 @@ The single source of truth for all global configurations.
 #### 3. `urls.py` (inside `backend/`)
 The main router file. It intercepts all incoming HTTP requests and delegates them to the appropriate app's `urls.py` file or specific view functions based on regex matchers. Here we route `/api/` down to `api/urls.py`.
 
+The **React** app uses **`POST /api/token/`** and **`POST /api/token/refresh/`** (via `frontend/src/api/auth.ts`) with tokens in **`localStorage`**; **`AuthProvider`** bootstraps session state using the access JWT’s **`exp`** before exposing **`isAuthenticated`** (see **`docs/architecture.md`** — Frontend authentication).
+
 #### 4. The `api/` App Directory
 Inside the app directory, you will commonly find or create:
 - **`models.py`**: Where you define database tables as Python schema classes mapping exactly to rows in PostgreSQL tables. 
@@ -48,7 +50,9 @@ Inside the app directory, you will commonly find or create:
 
 ### Domain services (this repo)
 
-Beyond thin views, feature logic often lives under **`api/services/`**. Examples: **`symptom_llm.py`** (LLM calls for chat and survey turns), **`report_service.py`** (pre-visit report prompt, parsing, and merging medication lines from survey payloads or `MedicationProfile`), **`nppes_nearby.py`** (facility search), **`survey_session_persist.py`** (append structured survey turns to `SymptomSession.ai_conversation_log`). See **`docs/architecture.md`** for how these pieces connect to the React app.
+Beyond thin views, feature logic often lives under **`api/services/`**. Examples: **`symptom_llm.py`** (LLM calls for chat and survey turns; **`get_survey_system_prompt_for_phase`** loads **`api/prompts/survey/*.txt`** when server-side survey prompts are enabled), **`report_service.py`** (pre-visit report prompt, parsing, and merging medication lines from survey payloads or `MedicationProfile`), **`nppes_nearby.py`** (facility search via NPPES **`taxonomy_code`** + Census), **`nppes_service.py`** (generic provider search: NUCC codes → **`taxonomy_code`**, descriptions → **`taxonomy_description`** per CMS NPI Registry 2.1), **`survey_session_persist.py`** (append structured survey turns to `SymptomSession.ai_conversation_log`). **`SymptomSurveyLlmView`** applies payload caps, optional server-only prompts (**`SYMPTOM_SURVEY_USE_SERVER_PROMPTS`**), per-user throttling (**`symptom_survey_llm`** scope), and typed LLM error responses. See **`docs/architecture.md`** and **`backend/settings.py`** (`SYMPTOM_SURVEY_*`) for details.
+
+**Session APIs:** List/detail/resume for the SPA use **`UserSymptomSessionsListView`** / **`UserSymptomSessionRetrieveUpdateDestroyView`** under **`/api/sessions/`**. The DRF router registers **`SymptomSessionViewSet`** at **`/api/symptom-sessions/`** (mock booking); it is **scoped to the authenticated user** via **`get_queryset()`** and **`perform_create`**.
 
 The **`users`** app defines **`User`** (`users/models.py`), including an optional JSON **`default_address`** (street, city, state, postal code) edited via **`GET` / `PATCH /api/auth/me/`** (`users/views.py` `MeView`, `users/serializers.py`) so the React settings page and Symptom Check can share one stored US address shape.
 

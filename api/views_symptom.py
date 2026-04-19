@@ -1,3 +1,4 @@
+import json
 import logging
 
 from django.conf import settings as django_settings
@@ -6,6 +7,7 @@ from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
 from .models import SymptomSession
@@ -20,8 +22,10 @@ from .services.survey_session_persist import (
     apply_condition_assessment_summary,
 )
 from .services.symptom_llm import (
+    classify_survey_llm_exception,
     complete_symptom_survey_turn,
     conversation_log_to_chat_messages,
+    get_survey_system_prompt_for_phase,
     get_symptom_chat_system_prompt,
     run_symptom_turn,
     trim_chat_messages,
@@ -100,8 +104,11 @@ class SymptomNearbyFacilitiesSerializer(serializers.Serializer):
 
 class SymptomSurveyLlmSerializer(serializers.Serializer):
     """
-    Structured Symptom Check (not chat): SPA sends the same system text it bundles from
-    `frontend/src/symptomCheck/prompts/*.txt` plus JSON user_payload for the model.
+    Structured Symptom Check (not chat): JSON user_payload for the model plus phase.
+
+    When ``settings.SYMPTOM_SURVEY_USE_SERVER_PROMPTS`` is True, the view ignores
+    ``system_prompt`` and loads instructions server-side (same files as the SPA bundle).
+    Payload sizes are capped to limit cost/DoS (see ``SYMPTOM_SURVEY_*`` settings).
     """
 
     phase = serializers.ChoiceField(
@@ -112,9 +119,25 @@ class SymptomSurveyLlmSerializer(serializers.Serializer):
             "price_estimate_context",
         ]
     )
-    system_prompt = serializers.CharField(min_length=1, max_length=200_000)
+    system_prompt = serializers.CharField(min_length=1)
     user_payload = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate_system_prompt(self, value: str) -> str:
+        t = value.strip()
+        max_c = django_settings.SYMPTOM_SURVEY_MAX_SYSTEM_PROMPT_CHARS
+        if len(t) > max_c:
+            raise serializers.ValidationError(
+                f"system_prompt exceeds maximum length ({max_c} characters)."
+            )
+        return t
+
+    def validate_user_payload(self, value):
+        raw = json.dumps(value, ensure_ascii=False)
+        max_b = django_settings.SYMPTOM_SURVEY_MAX_USER_PAYLOAD_BYTES
+        if len(raw.encode("utf-8")) > max_b:
+            raise serializers.ValidationError("user_payload JSON is too large.")
+        return value
 
 
 def _iso_z(dt):
@@ -226,17 +249,20 @@ class SymptomChatView(APIView):
 class SymptomSurveyLlmView(APIView):
     """
     POST JSON-only survey turns for `/symptom-check`: follow-up question generation or
-    condition assessment. Credentials stay server-side; the client only supplies prompts
-    it already ships in the bundle (not user-authored system instructions in production
-    unless you replace the SPA — validate on the gateway if that becomes a concern).
+    condition assessment. LLM credentials stay server-side.
+
+    In production (``SYMPTOM_SURVEY_USE_SERVER_PROMPTS``), system instructions are loaded
+    from the same prompt files the SPA bundles; the client ``system_prompt`` is ignored.
     """
 
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "symptom_survey_llm"
 
     def post(self, request):
         ser = SymptomSurveyLlmSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
-        system_prompt = ser.validated_data["system_prompt"].strip()
+        phase = ser.validated_data["phase"]
         user_payload = ser.validated_data["user_payload"]
         if not isinstance(user_payload, dict):
             return Response(
@@ -244,19 +270,109 @@ class SymptomSurveyLlmView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        uid = request.user.pk
+        if django_settings.SYMPTOM_SURVEY_USE_SERVER_PROMPTS:
+            try:
+                system_prompt = get_survey_system_prompt_for_phase(phase)
+            except ValueError as e:
+                return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            except RuntimeError:
+                logger.error(
+                    "Survey prompt file error phase=%s user_id=%s",
+                    phase,
+                    uid,
+                )
+                return Response(
+                    {"detail": "Server configuration error."},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        else:
+            system_prompt = ser.validated_data["system_prompt"].strip()
+
         try:
             raw_text = complete_symptom_survey_turn(system_prompt, user_payload)
         except RuntimeError as e:
-            logger.warning("LLM configuration error (survey): %s", e)
-            return Response({"detail": str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            msg = str(e).lower()
+            if "not configured" in msg or "api key" in msg:
+                logger.warning(
+                    "LLM configuration error (survey) user_id=%s phase=%s",
+                    uid,
+                    phase,
+                )
+                return Response(
+                    {"detail": str(e)},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            logger.warning(
+                "Survey LLM runtime error user_id=%s phase=%s",
+                uid,
+                phase,
+            )
+            return Response(
+                {
+                    "detail": "The language model returned an empty or invalid response. Please try again."
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        except ValueError:
+            logger.warning(
+                "Survey LLM validation error user_id=%s phase=%s",
+                uid,
+                phase,
+            )
+            return Response(
+                {"detail": "The model returned an invalid response. Please try again."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
         except Exception as e:
-            logger.exception("LLM request failed (survey): %s", e)
+            kind = classify_survey_llm_exception(e)
+            if kind == "rate_limit":
+                logger.warning(
+                    "Survey LLM rate limited user_id=%s phase=%s",
+                    uid,
+                    phase,
+                )
+                return Response(
+                    {
+                        "detail": "The language model is busy. Please try again shortly."
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            if kind == "transport":
+                logger.warning(
+                    "Survey LLM transport error user_id=%s phase=%s exc_type=%s",
+                    uid,
+                    phase,
+                    type(e).__name__,
+                )
+                return Response(
+                    {
+                        "detail": "Unable to reach the language model. Please try again."
+                    },
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+            if kind == "api_error":
+                logger.warning(
+                    "Survey LLM API error user_id=%s phase=%s exc_type=%s",
+                    uid,
+                    phase,
+                    type(e).__name__,
+                )
+                return Response(
+                    {"detail": "Upstream language model error."},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            logger.exception(
+                "Survey LLM request failed user_id=%s phase=%s exc_type=%s",
+                uid,
+                phase,
+                type(e).__name__,
+            )
             return Response(
                 {"detail": "Upstream language model error."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
-        phase = ser.validated_data["phase"]
         session_uuid = ser.validated_data.get("session_id")
         if session_uuid:
             session = get_object_or_404(

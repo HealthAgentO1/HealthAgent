@@ -203,6 +203,10 @@ REST_FRAMEWORK = {
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),
+    "DEFAULT_THROTTLE_RATES": {
+        # Authenticated Symptom Check survey LLM turns (cost / abuse guardrail).
+        "symptom_survey_llm": os.environ.get("SYMPTOM_SURVEY_THROTTLE", "120/hour"),
+    },
 }
 
 SIMPLE_JWT = {
@@ -236,6 +240,20 @@ LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "openai").strip().lower()
 
 # Budget for user+assistant turns sent to the model (tiktoken estimate); system prompt added on top.
 LLM_MAX_INPUT_TOKENS = int(os.environ.get("LLM_MAX_INPUT_TOKENS", "12000"))
+
+# Symptom Check survey LLM (`POST /api/symptom/survey-llm/`): payload bounds and prompt source.
+# When True, system instructions are loaded server-side by phase (bundled prompt files); client
+# `system_prompt` is ignored. When False (default in DEBUG), the client may send prompts (dev only).
+_default_survey_server = "false" if DEBUG else "true"
+SYMPTOM_SURVEY_USE_SERVER_PROMPTS = os.environ.get(
+    "SYMPTOM_SURVEY_USE_SERVER_PROMPTS", _default_survey_server
+).strip().lower() in ("1", "true", "yes")
+SYMPTOM_SURVEY_MAX_SYSTEM_PROMPT_CHARS = int(
+    os.environ.get("SYMPTOM_SURVEY_MAX_SYSTEM_PROMPT_CHARS", "32000"),
+)
+SYMPTOM_SURVEY_MAX_USER_PAYLOAD_BYTES = int(
+    os.environ.get("SYMPTOM_SURVEY_MAX_USER_PAYLOAD_BYTES", "65536"),
+)
 
 # NLM RxNav (no key) — resolves drug names to RxNorm RxCUIs when the LLM omits RxCUI.
 RXNAV_REST_BASE = os.environ.get("RXNAV_REST_BASE", "https://rxnav.nlm.nih.gov/REST").strip()
