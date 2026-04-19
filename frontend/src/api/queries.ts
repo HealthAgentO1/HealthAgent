@@ -26,6 +26,13 @@ export interface SymptomSession {
   confirmation_number?: string;
 }
 
+export interface CreateSymptomSessionData {
+  insurance_details: {
+    plan: string;
+    provider: string;
+  };
+}
+
 /** `GET /sessions/` — dashboard history cards */
 export interface SymptomSessionListItem {
   session_id: string;
@@ -69,6 +76,14 @@ const fetchProviders = async (zip: string, specialty?: string): Promise<Provider
     params: { zip, specialty },
   });
   return data;
+};
+
+// Create symptom session (exported for future flows; not yet wired in the UI)
+export const createSymptomSession = async (
+  data: CreateSymptomSessionData,
+): Promise<SymptomSession> => {
+  const { data: response } = await apiClient.post<SymptomSession>("/symptom-sessions/", data);
+  return response;
 };
 
 // Example React Query hook that developers can adapt for their slices

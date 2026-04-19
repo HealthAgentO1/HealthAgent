@@ -1,16 +1,46 @@
 /**
  * Symptom Check: three-step flow. Steps 2–3 call Django `POST /api/symptom/survey-llm/`
- * via `symptomLlmClient` (JWT on `apiClient`). Hospitals and cost blurbs stay static mocks.
+ * via `symptomLlmClient` (JWT on `apiClient`). Step 3 loads nearby facilities from
+ * `POST /api/symptom/nearby-facilities/` (NPPES + Census geocoding via Django).
+ *
+ * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
+ * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
  */
-import React, { useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { fetchSymptomSessionResume } from "../api/queries";
+import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
+import { validateUserAddress, type UserAddress } from "../symptomCheck/addressValidation";
+import {
+  buildGoogleMapsUrl,
+  requestNearbyFacilities,
+  type NearbyFacility,
+} from "../symptomCheck/nppesFacilitiesClient";
+import { parseJsonObjectFromLlm } from "../symptomCheck/parseLlmJson";
+import { US_STATE_OPTIONS, type UsStateCode } from "../symptomCheck/usStates";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
   requestSecondFollowUpQuestions,
+  type StructuredFollowUpAnswer,
 } from "../symptomCheck/symptomLlmClient";
-
-type FlowStep = "intake" | "followup" | "followup_round_2" | "results";
+import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
+import {
+  validateFollowUpQuestionsPayload,
+  validateSymptomResultsPayload,
+} from "../symptomCheck/validatePayloads";
+import {
+  SYMPTOM_CHECK_SESSION_VERSION,
+  clearSymptomCheckSession,
+  isRecoverableSymptomCheckSession,
+  readSymptomCheckSession,
+  writeSymptomCheckSession,
+  type SymptomCheckFlowStep,
+  type SymptomCheckPendingRequest,
+  type SymptomCheckSessionSnapshot,
+} from "../symptomCheck/symptomCheckSession";
 
 const INSURANCE_OPTIONS = [
   { id: "united", label: "United Healthcare" },
@@ -21,47 +51,63 @@ const INSURANCE_OPTIONS = [
 
 type InsuranceId = (typeof INSURANCE_OPTIONS)[number]["id"];
 
-const MOCK_HOSPITALS = [
-  {
-    name: "Riverside Medical Center",
-    distance: "1.2 mi",
-    address: "1200 Harbor Blvd",
-    careExample: "an urgent evaluation for acute abdominal pain",
-    costLow: 420,
-    costHigh: 1180,
-    costMid: 780,
-  },
-  {
-    name: "Summit Regional Hospital",
-    distance: "3.4 mi",
-    address: "88 Lakeside Dr",
-    careExample: "an urgent evaluation for acute abdominal pain",
-    costLow: 380,
-    costHigh: 1050,
-    costMid: 695,
-  },
-  {
-    name: "Oakwood Emergency Pavilion",
-    distance: "4.8 mi",
-    address: "401 Northcrest Ave",
-    careExample: "an urgent evaluation for acute abdominal pain",
-    costLow: 510,
-    costHigh: 1320,
-    costMid: 895,
-  },
-] as const;
+/** Which address inputs have been blurred; errors show only after blur if still invalid. */
+type AddressFieldKey = "street" | "city" | "state" | "postalCode";
+
+const INITIAL_ADDRESS_BLURRED: Record<AddressFieldKey, boolean> = {
+  street: false,
+  city: false,
+  state: false,
+  postalCode: false,
+};
 
 function insuranceLabel(id: InsuranceId): string {
   return INSURANCE_OPTIONS.find((o) => o.id === id)?.label ?? id;
 }
 
-function buildCostNarrative(
-  insurerLabel: string,
-  hospital: (typeof MOCK_HOSPITALS)[number],
-): string {
-  const fmt = (n: number) =>
-    `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
-  return `Based on publicly posted in-network prices for ${insurerLabel} tied to ${hospital.name} for ${hospital.careExample}, many plans show negotiated amounts roughly between ${fmt(hospital.costLow)} and ${fmt(hospital.costHigh)}, with a common midpoint around ${fmt(hospital.costMid)}.\n\nThis is not your personal cost; your deductible/coinsurance can change what you pay.`;
+/** Ensures persisted insurer ids still match the current option list. */
+function normalizeInsuranceId(id: string): InsuranceId | "" {
+  if (id === "") return "";
+  const found = INSURANCE_OPTIONS.find((o) => o.id === id);
+  return found ? found.id : "";
+}
+
+/** Illustrative cost copy is not tied to specific facilities until billing integration lands. */
+function buildGenericCostNarrative(insurerLabel: string): string {
+  return `Based on publicly posted in-network prices for ${insurerLabel}, negotiated amounts vary widely by facility, procedure code, and plan design. This is not your personal cost; your deductible and coinsurance can change what you pay.\n\nFacility-specific price examples are not shown in this preview.`;
+}
+
+/** Buckets Django `relevance_score` (NPI registry heuristics; public reviews are not available there). */
+function facilityListingFitLabel(score: number): string {
+  if (score >= 10) return "Stronger directory match (name & facility type)";
+  if (score >= 5) return "Typical facility listing";
+  return "Weaker directory signals — confirm before visiting";
+}
+
+/** Map insurer label from LLM payloads / resume API back to a known option id when possible. */
+function insuranceIdFromLabel(label: string): InsuranceId | "" {
+  const t = label.trim().toLowerCase();
+  if (!t) return "";
+  for (const o of INSURANCE_OPTIONS) {
+    if (o.label.toLowerCase() === t) return o.id;
+  }
+  for (const o of INSURANCE_OPTIONS) {
+    const ol = o.label.toLowerCase();
+    if (t.includes(ol) || ol.includes(t)) return o.id;
+  }
+  return "";
+}
+
+function buildStructuredAnswers(
+  questions: FollowUpQuestion[],
+  answers: Record<string, FollowUpAnswer>,
+): StructuredFollowUpAnswer[] {
+  return questions.map((q) => ({
+    question_id: q.id,
+    question_prompt: q.prompt,
+    input_type: q.input_type,
+    value: answers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
+  }));
 }
 
 /** Default control values so required validation and sliders start in a defined state. */
@@ -106,56 +152,204 @@ function followUpAnswersSatisfy(
 /** Tailwind bundles for overall / per-condition severity chips (mild | moderate | severe). */
 function severityStyles(level: string): string {
   if (level === "severe") {
-    return "bg-error-container/40 text-on-error-container border border-error-container/50";
+    return "bg-error-container/40 text-on-error-container border border-red-800/40";
   }
   if (level === "moderate") {
-    return "bg-tertiary-container/50 text-on-tertiary-container border border-tertiary-container/40";
+    return "bg-orange-500/12 text-orange-800 border border-orange-400/35";
   }
-  return "bg-primary-fixed/15 text-primary border border-primary-fixed-dim/40";
+  return "bg-teal-500/12 text-teal-800 border border-teal-400/35";
 }
 
 const SymptomCheckPage: React.FC = () => {
-  const [step, setStep] = useState<FlowStep>("intake");
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [step, setStep] = useState<SymptomCheckFlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
+  /** Step 1: practice location for NPPES distance ranking (mirrored to `symptomCheckSession`). */
+  const [userAddress, setUserAddress] = useState<UserAddress>({
+    street: "",
+    city: "",
+    state: "",
+    postalCode: "",
+  });
+  const [addressFieldBlurred, setAddressFieldBlurred] =
+    useState<Record<AddressFieldKey, boolean>>(INITIAL_ADDRESS_BLURRED);
   // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
-  // Step 2b (optional): second round of questions to further narrow the diagnosis.
   const [secondFollowUpQuestions, setSecondFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [secondFollowUpAnswers, setSecondFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
-  // Django session ID from first LLM call; required for condition assessment.
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  // Serializes Continue / See results while `requestFollowUpQuestions` or `requestConditionAssessment` runs.
-  const [pendingRequest, setPendingRequest] = useState<null | "followup" | "followup_round_2" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
+  /** Step 3: NPPES-backed facilities (relevance + distance on the server). */
+  const [nearbyFacilities, setNearbyFacilities] = useState<NearbyFacility[] | null>(null);
+  const [nearbyLoading, setNearbyLoading] = useState(false);
+  const [nearbyError, setNearbyError] = useState<string | null>(null);
+  const [nearbyTaxonomyUsed, setNearbyTaxonomyUsed] = useState<string | null>(null);
+  /** Fades results content in after the LLM response lands. */
+  const [resultsEntered, setResultsEntered] = useState(false);
+  /** Tracks in-flight LLM phases for UI disable + session resume (see `symptomCheckSession`). */
+  const [pendingRequest, setPendingRequest] = useState<SymptomCheckPendingRequest>(null);
+  /** Django `SymptomSession.public_id` after follow-up questions; sent with condition assessment. */
+  const [surveyBackendSessionId, setSurveyBackendSessionId] = useState<string | null>(null);
+  const [urlSessionHydrating, setUrlSessionHydrating] = useState(false);
+  const [resumeChatNotice, setResumeChatNotice] = useState(false);
 
-  const intakeValid = symptoms.trim().length > 0 && insurance !== "";
+  const followUpMutation = useMutation({
+    mutationFn: (vars: { symptoms: string; insuranceLabel: string }): Promise<FollowUpQuestionsWithSession> =>
+      requestFollowUpQuestions(vars),
+  });
+
+  const resultsMutation = useMutation({
+    mutationFn: (vars: {
+      symptoms: string;
+      insuranceLabel: string;
+      followUpAnswers: StructuredFollowUpAnswer[];
+      sessionId: string;
+    }) => requestConditionAssessment(vars),
+  });
+
+  const followUpLoading = followUpMutation.isPending;
+  const resultsLoading = resultsMutation.isPending;
+  const followUpProgress = useSimulatedProgress(followUpLoading);
+  const resultsProgress = useSimulatedProgress(resultsLoading);
+  const roundTwoRequestProgress = useSimulatedProgress(pendingRequest === "followup_round_2");
+
+  /**
+   * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
+   * `ready`: normal operation; state syncs to `localStorage`.
+   */
+  const [sessionGate, setSessionGate] = useState<"need-choice" | "ready">(() => {
+    if (typeof window === "undefined") return "ready";
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("session")?.trim()) return "ready";
+    const snap = readSymptomCheckSession();
+    if (snap && isRecoverableSymptomCheckSession(snap)) return "need-choice";
+    return "ready";
+  });
+
+  const addressValidation = useMemo(() => validateUserAddress(userAddress), [userAddress]);
+
+  /** Deep link from dashboard: `?session=<uuid>` loads server state and skips the local resume modal. */
+  useEffect(() => {
+    const sid = searchParams.get("session")?.trim();
+    if (!sid) return;
+
+    let cancelled = false;
+    setSessionGate("ready");
+    setUrlSessionHydrating(true);
+    setLlmError(null);
+    setResumeChatNotice(false);
+
+    void (async () => {
+      try {
+        clearSymptomCheckSession();
+        const data = await fetchSymptomSessionResume(sid);
+        if (cancelled) return;
+
+        setSurveyBackendSessionId(sid);
+        setSymptoms(data.symptoms ?? "");
+        setInsurance(insuranceIdFromLabel(data.insurance_label ?? ""));
+        setPendingRequest(null);
+        setResultsEntered(false);
+
+        if (data.resume_step === "followup" && data.followup_raw_text) {
+          try {
+            const parsed = parseJsonObjectFromLlm(data.followup_raw_text);
+            const { questions } = validateFollowUpQuestionsPayload(parsed);
+            setFollowUpQuestions(questions);
+            setFollowUpAnswers(buildInitialAnswers(questions));
+            setSecondFollowUpQuestions([]);
+            setSecondFollowUpAnswers({});
+            setResults(null);
+            setStep("followup");
+          } catch {
+            setLlmError("Could not restore follow-up questions from this session.");
+            setStep("intake");
+            setFollowUpQuestions([]);
+            setFollowUpAnswers({});
+          }
+        } else if (data.resume_step === "results" && data.results_raw_text) {
+          try {
+            const parsed = parseJsonObjectFromLlm(data.results_raw_text);
+            const resPayload = validateSymptomResultsPayload(parsed);
+            setFollowUpQuestions([]);
+            setFollowUpAnswers({});
+            setResults(resPayload);
+            setStep("results");
+          } catch {
+            setLlmError("Could not restore results from this session.");
+            setStep("intake");
+          }
+        } else if (data.resume_step === "chat") {
+          setFollowUpQuestions([]);
+          setFollowUpAnswers({});
+          setResults(null);
+          setStep("intake");
+          setResumeChatNotice(true);
+        } else {
+          setFollowUpQuestions([]);
+          setFollowUpAnswers({});
+          setResults(null);
+          setStep("intake");
+        }
+
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("session");
+            return next;
+          },
+          { replace: true },
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setLlmError(
+            e instanceof Error
+              ? e.message
+              : "Unable to load this session. Try again from the dashboard.",
+          );
+          setStep("intake");
+        }
+      } finally {
+        if (!cancelled) setUrlSessionHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams]);
+
+  const intakeValid =
+    symptoms.trim().length > 0 && insurance !== "" && addressValidation.valid;
 
   const followUpValid = followUpAnswersSatisfy(followUpQuestions, followUpAnswers);
 
   const secondFollowUpValid =
-    secondFollowUpQuestions.length === 0 || followUpAnswersSatisfy(secondFollowUpQuestions, secondFollowUpAnswers);
+    secondFollowUpQuestions.length === 0 ||
+    followUpAnswersSatisfy(secondFollowUpQuestions, secondFollowUpAnswers);
 
   const insurerLabel = useMemo(
     () => (insurance ? insuranceLabel(insurance) : ""),
     [insurance],
   );
 
-  /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
-  const handleContinueToFollowUp = async () => {
-    if (!intakeValid || pendingRequest) return;
+  /** First LLM call (intake → follow-up questions). Params allow resume without relying on async state. */
+  const runFollowUpRequest = async (input: { symptoms: string; insuranceLabel: string }) => {
     setLlmError(null);
     setPendingRequest("followup");
     try {
-      const data = await requestFollowUpQuestions({
-        symptoms: symptoms.trim(),
-        insuranceLabel: insurerLabel,
+      const data = await followUpMutation.mutateAsync({
+        symptoms: input.symptoms,
+        insuranceLabel: input.insuranceLabel,
       });
+      setSurveyBackendSessionId(data.session_id);
       setFollowUpQuestions(data.questions);
       setFollowUpAnswers(buildInitialAnswers(data.questions));
-      setSessionId(data.session_id);
+      setSecondFollowUpQuestions([]);
+      setSecondFollowUpAnswers({});
       setResults(null);
       setStep("followup");
     } catch (err) {
@@ -165,84 +359,51 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
-  /** Step 2 → 2b or 3: Check if model needs more questions, or proceed to results. */
-  const handleCheckAndProceed = async () => {
-    if (!followUpValid || pendingRequest) return;
-    setLlmError(null);
-    setPendingRequest("followup_round_2");
-    try {
-      const structured = followUpQuestions.map((q) => ({
-        question_id: q.id,
-        question_prompt: q.prompt,
-        input_type: q.input_type,
-        value: followUpAnswers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
-      }));
-
-      const data = await requestSecondFollowUpQuestions({
-        symptoms: symptoms.trim(),
-        insuranceLabel: insurerLabel,
-        firstRoundAnswers: structured,
-      });
-
-      // If no additional questions are needed, proceed directly to results
-      if (data.questions.length === 0) {
-        setPendingRequest("results");
-        try {
-          const payload = await requestConditionAssessment({
-            symptoms: symptoms.trim(),
-            insuranceLabel: insurerLabel,
-            followUpAnswers: structured,
-            sessionId: sessionId || "",
-          });
-          setResults(payload);
-          setStep("results");
-        } catch (err) {
-          setLlmError(err instanceof Error ? err.message : "Unable to load assessment results.");
-          setPendingRequest(null);
-        }
-      } else {
-        // Show second round of questions
-        setSecondFollowUpQuestions(data.questions);
-        setSecondFollowUpAnswers(buildInitialAnswers(data.questions));
-        setStep("followup_round_2");
-        setPendingRequest(null);
-      }
-    } catch (err) {
-      setLlmError(err instanceof Error ? err.message : "Unable to evaluate. Please try again.");
-      setPendingRequest(null);
+  /** Final LLM call (follow-up round(s) → results). Supports one or two question rounds. */
+  const runResultsRequest = async (input: {
+    symptoms: string;
+    insuranceLabel: string;
+    questionsRound1: FollowUpQuestion[];
+    answersRound1: Record<string, FollowUpAnswer>;
+    questionsRound2?: FollowUpQuestion[];
+    answersRound2?: Record<string, FollowUpAnswer>;
+    backendSessionId: string | null;
+  }) => {
+    const q2 = input.questionsRound2 ?? [];
+    const a2 = input.answersRound2 ?? {};
+    if (!followUpAnswersSatisfy(input.questionsRound1, input.answersRound1)) {
+      setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      return;
     }
-  };
-
-  /** Step 2/2b → 3: second/third LLM request includes prompts + values for traceability in `user_payload`. */
-  const handleSeeResults = async () => {
-    if (!followUpValid || !secondFollowUpValid || pendingRequest) return;
+    if (q2.length > 0 && !followUpAnswersSatisfy(q2, a2)) {
+      setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      return;
+    }
+    if (!input.backendSessionId) {
+      setLlmError(
+        "This session is missing server data. Please start a new symptom check from the beginning.",
+      );
+      return;
+    }
+    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
     setLlmError(null);
     setPendingRequest("results");
     try {
-      // Combine both rounds of answers
-      const allAnswers = [
-        ...followUpQuestions.map((q) => ({
-          question_id: q.id,
-          question_prompt: q.prompt,
-          input_type: q.input_type,
-          value: followUpAnswers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
-        })),
-        ...secondFollowUpQuestions.map((q) => ({
-          question_id: q.id,
-          question_prompt: q.prompt,
-          input_type: q.input_type,
-          value: secondFollowUpAnswers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
-        })),
+      const structured = [
+        ...buildStructuredAnswers(input.questionsRound1, input.answersRound1),
+        ...buildStructuredAnswers(q2, a2),
       ];
 
-      const payload = await requestConditionAssessment({
-        symptoms: symptoms.trim(),
-        insuranceLabel: insurerLabel,
-        followUpAnswers: allAnswers,
-        sessionId: sessionId || "",
+      const payload = await resultsMutation.mutateAsync({
+        symptoms: input.symptoms,
+        insuranceLabel: input.insuranceLabel,
+        followUpAnswers: structured,
+        sessionId: input.backendSessionId,
       });
       setResults(payload);
       setStep("results");
+      void queryClient.invalidateQueries({ queryKey: ["symptom-sessions"] });
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to load assessment results.");
     } finally {
@@ -250,28 +411,293 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
-  const restart = () => {
+  /** After round 1: either a second question round or jump straight to condition assessment. */
+  const handleCheckAndProceed = async () => {
+    if (!followUpValid || pendingRequest) return;
+    if (!surveyBackendSessionId) {
+      setLlmError(
+        "This session is missing server data. Please start a new symptom check from the beginning.",
+      );
+      return;
+    }
+    setLlmError(null);
+    setPendingRequest("followup_round_2");
+    try {
+      const structured = buildStructuredAnswers(followUpQuestions, followUpAnswers);
+      const data = await requestSecondFollowUpQuestions({
+        symptoms: symptoms.trim(),
+        insuranceLabel: insurerLabel,
+        firstRoundAnswers: structured,
+        sessionId: surveyBackendSessionId,
+      });
+
+      if (data.questions.length === 0) {
+        await runResultsRequest({
+          symptoms: symptoms.trim(),
+          insuranceLabel: insurerLabel,
+          questionsRound1: followUpQuestions,
+          answersRound1: followUpAnswers,
+          backendSessionId: surveyBackendSessionId,
+        });
+      } else {
+        setSecondFollowUpQuestions(data.questions);
+        setSecondFollowUpAnswers(buildInitialAnswers(data.questions));
+        setStep("followup_round_2");
+      }
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Unable to evaluate. Please try again.");
+    } finally {
+      setPendingRequest(null);
+    }
+  };
+
+  /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
+  const handleContinueToFollowUp = async () => {
+    if (!intakeValid || pendingRequest) return;
+    await runFollowUpRequest({
+      symptoms: symptoms.trim(),
+      insuranceLabel: insurerLabel,
+    });
+  };
+
+  /** Round 2 (if any) → condition assessment. */
+  const handleSeeResults = async () => {
+    if (!followUpValid || !secondFollowUpValid || pendingRequest) return;
+    await runResultsRequest({
+      symptoms: symptoms.trim(),
+      insuranceLabel: insurerLabel,
+      questionsRound1: followUpQuestions,
+      answersRound1: followUpAnswers,
+      questionsRound2: secondFollowUpQuestions,
+      answersRound2: secondFollowUpAnswers,
+      backendSessionId: surveyBackendSessionId,
+    });
+  };
+
+  /** App content scrolls inside `Layout`’s `<main>`; reset both so each flow step starts at the top. */
+  useEffect(() => {
+    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [step]);
+
+  // Mirror flow state to localStorage whenever the user is past the resume gate.
+  useEffect(() => {
+    if (sessionGate !== "ready") return;
+
+    const snapshot: SymptomCheckSessionSnapshot = {
+      version: SYMPTOM_CHECK_SESSION_VERSION,
+      updatedAt: new Date().toISOString(),
+      step,
+      symptoms,
+      insurance,
+      address: {
+        street: userAddress.street,
+        city: userAddress.city,
+        state: userAddress.state,
+        postalCode: userAddress.postalCode,
+      },
+      followUpQuestions,
+      followUpAnswers,
+      secondFollowUpQuestions,
+      secondFollowUpAnswers,
+      results,
+      pendingRequest,
+      llmError,
+      surveyBackendSessionId,
+    };
+    writeSymptomCheckSession(snapshot);
+  }, [
+    sessionGate,
+    step,
+    symptoms,
+    insurance,
+    userAddress,
+    followUpQuestions,
+    followUpAnswers,
+    secondFollowUpQuestions,
+    secondFollowUpAnswers,
+    results,
+    pendingRequest,
+    llmError,
+    surveyBackendSessionId,
+  ]);
+
+  /** After the LLM returns `care_taxonomy`, ask Django to rank NPPES facilities by road distance (via geocoding). */
+  useEffect(() => {
+    if (step !== "results") {
+      setNearbyFacilities(null);
+      setNearbyError(null);
+      setNearbyTaxonomyUsed(null);
+      setNearbyLoading(false);
+      return;
+    }
+    if (!results) return;
+
+    if (!addressValidation.valid) {
+      setNearbyFacilities(null);
+      setNearbyTaxonomyUsed(null);
+      setNearbyError(
+        "Add a valid US address on step 1 to see nearby facilities. Go back to the first step, enter your address, then continue.",
+      );
+      setNearbyLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setNearbyLoading(true);
+    setNearbyError(null);
+    setNearbyFacilities(null);
+    setNearbyTaxonomyUsed(null);
+
+    const run = async () => {
+      try {
+        const payload = await requestNearbyFacilities({
+          street: userAddress.street.trim(),
+          city: userAddress.city.trim(),
+          state: userAddress.state,
+          postal_code: userAddress.postalCode.trim(),
+          taxonomy_codes: results.care_taxonomy.taxonomy_codes,
+          suggested_care_setting: results.care_taxonomy.suggested_care_setting,
+        });
+        if (cancelled) return;
+        setNearbyFacilities(payload.facilities);
+        setNearbyTaxonomyUsed(payload.taxonomy_used);
+      } catch (e) {
+        if (cancelled) return;
+        setNearbyFacilities(null);
+        setNearbyError(e instanceof Error ? e.message : "Unable to load nearby facilities.");
+      } finally {
+        if (!cancelled) setNearbyLoading(false);
+      }
+    };
+
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    step,
+    results,
+    addressValidation.valid,
+    userAddress.street,
+    userAddress.city,
+    userAddress.state,
+    userAddress.postalCode,
+  ]);
+
+  const applySnapshotToState = (snap: SymptomCheckSessionSnapshot) => {
+    setStep(snap.step);
+    setSymptoms(snap.symptoms);
+    setInsurance(normalizeInsuranceId(snap.insurance));
+    setUserAddress({
+      street: snap.address.street,
+      city: snap.address.city,
+      state: (snap.address.state as UsStateCode | "") || "",
+      postalCode: snap.address.postalCode,
+    });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
+    setFollowUpQuestions(snap.followUpQuestions);
+    setFollowUpAnswers(snap.followUpAnswers);
+    setSecondFollowUpQuestions(snap.secondFollowUpQuestions);
+    setSecondFollowUpAnswers(snap.secondFollowUpAnswers);
+    setResults(snap.results);
+    setLlmError(snap.llmError);
+    setSurveyBackendSessionId(snap.surveyBackendSessionId);
+    setPendingRequest(null);
+  };
+
+  /** Restore saved answers and optionally replay the in-flight LLM call from the saved phase. */
+  const handleResumeSession = () => {
+    const snap = readSymptomCheckSession();
+    if (!snap) {
+      setSessionGate("ready");
+      return;
+    }
+    applySnapshotToState(snap);
+    setSessionGate("ready");
+
+    const ins = normalizeInsuranceId(snap.insurance);
+    const label = ins ? insuranceLabel(ins) : "";
+    const trimmed = snap.symptoms.trim();
+
+    if (snap.pendingRequest === "followup") {
+      if (trimmed.length === 0 || !ins) return;
+      void runFollowUpRequest({ symptoms: trimmed, insuranceLabel: label });
+    } else if (snap.pendingRequest === "followup_round_2") {
+      if (trimmed.length === 0 || !ins) return;
+      if (snap.followUpQuestions.length === 0) return;
+      if (!snap.surveyBackendSessionId) return;
+      void handleCheckAndProceed();
+    } else if (snap.pendingRequest === "results") {
+      if (trimmed.length === 0 || !ins) return;
+      if (snap.followUpQuestions.length === 0) return;
+      void runResultsRequest({
+        symptoms: trimmed,
+        insuranceLabel: label,
+        questionsRound1: snap.followUpQuestions,
+        answersRound1: snap.followUpAnswers,
+        questionsRound2: snap.secondFollowUpQuestions,
+        answersRound2: snap.secondFollowUpAnswers,
+        backendSessionId: snap.surveyBackendSessionId,
+      });
+    }
+  };
+
+  const handleStartOverFromPrompt = () => {
+    clearSymptomCheckSession();
     setStep("intake");
     setSymptoms("");
     setInsurance("");
+    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
     setSecondFollowUpQuestions([]);
     setSecondFollowUpAnswers({});
     setResults(null);
-    setSessionId(null);
     setLlmError(null);
     setPendingRequest(null);
+    setSurveyBackendSessionId(null);
+    setResumeChatNotice(false);
+    setSessionGate("ready");
   };
 
-  const stepIndex = step === "intake" ? 1 : step === "followup" ? 2 : step === "followup_round_2" ? 2 : 3;
+  const restart = () => {
+    clearSymptomCheckSession();
+    followUpMutation.reset();
+    resultsMutation.reset();
+    setStep("intake");
+    setSymptoms("");
+    setInsurance("");
+    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
+    setFollowUpQuestions([]);
+    setFollowUpAnswers({});
+    setSecondFollowUpQuestions([]);
+    setSecondFollowUpAnswers({});
+    setResults(null);
+    setLlmError(null);
+    setPendingRequest(null);
+    setSurveyBackendSessionId(null);
+    setResumeChatNotice(false);
+    setResultsEntered(false);
+  };
+
+  useEffect(() => {
+    if (!results) {
+      setResultsEntered(false);
+      return;
+    }
+    setResultsEntered(false);
+    const t = window.setTimeout(() => setResultsEntered(true), 40);
+    return () => clearTimeout(t);
+  }, [results]);
+
+  const stepIndex =
+    step === "intake" ? 1 : step === "followup" || step === "followup_round_2" ? 2 : 3;
 
   const updateAnswer = (questionId: string, value: FollowUpAnswer) => {
     setFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
-  };
-
-  const updateSecondRoundAnswer = (questionId: string, value: FollowUpAnswer) => {
-    setSecondFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
   /**
@@ -298,9 +724,10 @@ const SymptomCheckPage: React.FC = () => {
     updateAnswer(question.id, next);
   };
 
-  /**
-   * Multi-choice handler for second round of questions.
-   */
+  const updateSecondRoundAnswer = (questionId: string, value: FollowUpAnswer) => {
+    setSecondFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
+  };
+
   const toggleSecondRoundMultiChoice = (question: FollowUpQuestion, optionId: string) => {
     const current = secondFollowUpAnswers[question.id];
     const selected = Array.isArray(current) ? [...current] : [];
@@ -327,7 +754,7 @@ const SymptomCheckPage: React.FC = () => {
 
     if (q.input_type === "single_choice" && q.options) {
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -371,7 +798,7 @@ const SymptomCheckPage: React.FC = () => {
     if (q.input_type === "multi_choice" && q.options) {
       const selected = Array.isArray(value) ? value : [];
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -488,13 +915,13 @@ const SymptomCheckPage: React.FC = () => {
     return null;
   };
 
-  /** Renderer for second round follow-up questions (uses secondary answer state). */
+  /** Second-round questions (same controls as round 1; separate state). */
   const renderSecondRoundQuestion = (q: FollowUpQuestion) => {
     const value = secondFollowUpAnswers[q.id];
 
     if (q.input_type === "single_choice" && q.options) {
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -521,7 +948,7 @@ const SymptomCheckPage: React.FC = () => {
                   <input
                     checked={selected}
                     className="accent-secondary w-4 h-4 shrink-0"
-                    name={q.id}
+                    name={`round2-${q.id}`}
                     type="radio"
                     value={opt.id}
                     onChange={() => updateSecondRoundAnswer(q.id, opt.id)}
@@ -538,7 +965,7 @@ const SymptomCheckPage: React.FC = () => {
     if (q.input_type === "multi_choice" && q.options) {
       const selected = Array.isArray(value) ? value : [];
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -655,9 +1082,64 @@ const SymptomCheckPage: React.FC = () => {
     return null;
   };
 
+  const followupRound1Busy = pendingRequest === "followup_round_2" || resultsLoading;
+
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12 pb-16">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-6xl mx-auto relative">
+        {urlSessionHydrating ? (
+          <div
+            aria-busy="true"
+            aria-live="polite"
+            className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/45 p-6"
+          >
+            <div className="h-10 w-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <p className="font-body text-sm font-medium text-on-primary">
+              Opening your saved session…
+            </p>
+          </div>
+        ) : null}
+
+        {sessionGate === "need-choice" ? (
+          <div
+            aria-labelledby="symptom-session-resume-title"
+            aria-modal="true"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+            role="dialog"
+          >
+            <div className="bg-surface-container-lowest rounded-xl shadow-xl max-w-md w-full p-6 md:p-8 border border-outline-variant/20">
+              <h2
+                className="text-xl font-headline font-bold text-primary mb-2"
+                id="symptom-session-resume-title"
+              >
+                Resume your symptom check?
+              </h2>
+              <p className="text-sm text-on-surface-variant font-body leading-relaxed mb-6">
+                We saved your progress in this browser. You can continue where you left off, or start
+                over. If a question step was loading when you left, we will request it again when you
+                resume.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <button
+                  className="cursor-pointer gradient-primary text-on-primary px-6 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 sm:flex-1"
+                  type="button"
+                  onClick={handleResumeSession}
+                >
+                  Resume
+                  <span className="material-symbols-outlined text-lg">play_arrow</span>
+                </button>
+                <button
+                  className="cursor-pointer px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
+                  type="button"
+                  onClick={handleStartOverFromPrompt}
+                >
+                  Start over
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <header className="mb-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed text-xs font-semibold uppercase tracking-wider mb-4 border border-secondary-fixed-dim/30">
@@ -682,8 +1164,34 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         </header>
 
+        {resumeChatNotice && step === "intake" ? (
+          <div
+            className="mb-8 rounded-xl border border-primary/30 bg-primary-fixed/10 px-4 py-4 md:px-6 md:py-5 flex flex-col sm:flex-row sm:items-center gap-4"
+            role="status"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="font-headline text-sm font-bold text-primary mb-1">Conversational session</p>
+              <p className="font-body text-sm text-on-surface-variant">
+                This entry was created with the live chat interview, not the structured Symptom Check
+                questionnaire. You can start a new guided check below whenever you are ready.
+              </p>
+            </div>
+            <button
+              className="shrink-0 font-headline text-sm font-semibold text-primary border border-primary/40 rounded-lg px-4 py-2 hover:bg-primary/5 transition-colors"
+              type="button"
+              onClick={() => setResumeChatNotice(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {step === "intake" && (
-          <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden">
+          <section
+            className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden transition-opacity duration-300 ease-out ${
+              followUpLoading ? "opacity-60 pointer-events-none" : "opacity-100"
+            }`}
+          >
             <div className="absolute -top-12 -right-12 w-40 h-40 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
             <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
               <span className="material-symbols-outlined text-secondary">edit_note</span>
@@ -713,7 +1221,7 @@ const SymptomCheckPage: React.FC = () => {
                 </p>
               </div>
 
-              <fieldset className="border-0 p-0 m-0">
+              <fieldset className="border-0 p-0 mx-0 mb-0">
                 <legend className="block text-sm font-semibold text-on-surface mb-3">
                   Insurance provider
                   <span className="text-error ml-1" aria-hidden>
@@ -749,25 +1257,203 @@ const SymptomCheckPage: React.FC = () => {
                 </div>
               </fieldset>
 
+              <div className="pt-10 mt-2 border-t border-outline-variant/15">
+                <fieldset className="border-0 p-0 mx-0 mb-0">
+                  <legend className="block text-sm font-semibold text-on-surface mb-2">
+                    Current address
+                    <span className="text-error ml-1" aria-hidden>
+                      *
+                    </span>
+                  </legend>
+                  <p className="text-xs text-on-surface-variant font-body mb-4">
+                    Used to rank nearby facilities for your situation. US addresses only (NPPES directory).
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-street"
+                      >
+                        Street address
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <input
+                        aria-invalid={
+                          addressFieldBlurred.street && Boolean(addressValidation.errors.street)
+                        }
+                        autoComplete="street-address"
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
+                        id="addr-street"
+                        placeholder="123 Main St, Apt 4"
+                        type="text"
+                        value={userAddress.street}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, street: true }))
+                        }
+                        onChange={(e) =>
+                          setUserAddress((prev) => ({ ...prev, street: e.target.value }))
+                        }
+                      />
+                      {addressFieldBlurred.street && addressValidation.errors.street ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.street}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-city"
+                      >
+                        City
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <input
+                        aria-invalid={
+                          addressFieldBlurred.city && Boolean(addressValidation.errors.city)
+                        }
+                        autoComplete="address-level2"
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
+                        id="addr-city"
+                        placeholder="City"
+                        type="text"
+                        value={userAddress.city}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, city: true }))
+                        }
+                        onChange={(e) =>
+                          setUserAddress((prev) => ({ ...prev, city: e.target.value }))
+                        }
+                      />
+                      {addressFieldBlurred.city && addressValidation.errors.city ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.city}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-state"
+                      >
+                        State
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <select
+                        aria-invalid={
+                          addressFieldBlurred.state && Boolean(addressValidation.errors.state)
+                        }
+                        className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-inner"
+                        id="addr-state"
+                        value={userAddress.state}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, state: true }))
+                        }
+                        onChange={(e) =>
+                          setUserAddress((prev) => ({
+                            ...prev,
+                            state: e.target.value as UsStateCode | "",
+                          }))
+                        }
+                      >
+                        <option value="">Select state</option>
+                        {US_STATE_OPTIONS.map((s) => (
+                          <option key={s.code} value={s.code}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                      {addressFieldBlurred.state && addressValidation.errors.state ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.state}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div className="md:col-span-2">
+                      <label
+                        className="block text-sm font-semibold text-on-surface mb-2"
+                        htmlFor="addr-zip"
+                      >
+                        ZIP code
+                        <span className="text-error ml-1" aria-hidden>
+                          *
+                        </span>
+                      </label>
+                      <input
+                        aria-invalid={
+                          addressFieldBlurred.postalCode &&
+                          Boolean(addressValidation.errors.postalCode)
+                        }
+                        inputMode="numeric"
+                        autoComplete="postal-code"
+                        className="w-full max-w-xs bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
+                        id="addr-zip"
+                        maxLength={5}
+                        placeholder="12345"
+                        type="text"
+                        value={userAddress.postalCode}
+                        onBlur={() =>
+                          setAddressFieldBlurred((prev) => ({ ...prev, postalCode: true }))
+                        }
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/\D/g, "").slice(0, 5);
+                          setUserAddress((prev) => ({ ...prev, postalCode: v }));
+                        }}
+                      />
+                      {addressFieldBlurred.postalCode && addressValidation.errors.postalCode ? (
+                        <p className="mt-1 text-xs text-error font-body" role="alert">
+                          {addressValidation.errors.postalCode}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </fieldset>
+              </div>
+
               {llmError ? (
                 <p className="text-sm text-error font-body" role="alert">
                   {llmError}
                 </p>
               ) : null}
 
+              {followUpLoading ? (
+                <div
+                  className="mt-8 pt-6 border-t border-outline-variant/15 space-y-3 transition-opacity duration-300 ease-out"
+                  aria-live="polite"
+                >
+                  <p className="text-sm font-semibold text-primary font-headline">
+                    Generating follow-up questions…
+                  </p>
+                  <LinearLoadingBar
+                    estimatedSeconds={30}
+                    label="Generating follow-up questions"
+                    progress={followUpProgress}
+                  />
+                </div>
+              ) : null}
+
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
                 <button
-                  className="gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none"
-                  disabled={!intakeValid || pendingRequest !== null}
+                  className="cursor-pointer gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed"
+                  disabled={!intakeValid || followUpLoading}
                   type="button"
                   onClick={() => void handleContinueToFollowUp()}
                 >
-                  {pendingRequest === "followup" ? "Preparing questions…" : "Continue"}
+                  {followUpLoading ? "Preparing questions…" : "Continue"}
                   <span className="material-symbols-outlined text-lg">arrow_forward</span>
                 </button>
                 {!intakeValid && (
                   <p className="text-xs text-on-surface-variant font-body">
-                    Add a symptom description and choose an insurer to continue.
+                    Add symptoms, choose an insurer, and complete your address to continue.
                   </p>
                 )}
               </div>
@@ -777,119 +1463,195 @@ const SymptomCheckPage: React.FC = () => {
 
         {step === "followup" && (
           <div className="space-y-6">
-            <div className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3">
+            <div
+              className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
+                followupRound1Busy ? "opacity-40" : "opacity-100"
+              }`}
+            >
               <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
               <div>
                 <h3 className="text-sm font-bold text-primary mb-1 font-headline">Follow-up questions</h3>
                 <p className="text-sm text-on-surface-variant font-body leading-relaxed">
                   These questions were generated from your symptom description to mirror what a
-                  clinician might ask next. After you answer, we'll determine if we need more detail
-                  or if we have enough to show you possible conditions.
+                  clinician might ask next. After you answer, we will check whether a bit more detail
+                  helps before showing possible conditions.
                 </p>
               </div>
             </div>
 
-            <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
-              <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">quiz</span>
-                Short questionnaire
-              </h2>
+            <div className="relative">
+              <section
+                className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
+                  followupRound1Busy ? "opacity-35 pointer-events-none" : "opacity-100"
+                }`}
+              >
+                <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">quiz</span>
+                  Short questionnaire
+                </h2>
 
-              <div className="space-y-10">
-                {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
-              </div>
+                <div className="space-y-10">
+                  {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
+                </div>
 
-              {llmError ? (
-                <p className="mt-8 text-sm text-error font-body" role="alert">
-                  {llmError}
-                </p>
+                {llmError ? (
+                  <p className="mt-8 text-sm text-error font-body" role="alert">
+                    {llmError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
+                  <button
+                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    type="button"
+                    onClick={() => {
+                      setStep("intake");
+                      setFollowUpQuestions([]);
+                      setFollowUpAnswers({});
+                      setSecondFollowUpQuestions([]);
+                      setSecondFollowUpAnswers({});
+                      setLlmError(null);
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="cursor-pointer gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed sm:ml-auto"
+                    disabled={!followUpValid || followupRound1Busy}
+                    type="button"
+                    onClick={() => void handleCheckAndProceed()}
+                  >
+                    {pendingRequest === "followup_round_2"
+                      ? "Evaluating…"
+                      : resultsLoading
+                        ? "Analyzing responses…"
+                        : "Continue"}
+                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                  </button>
+                </div>
+              </section>
+
+              {followupRound1Busy ? (
+                <div
+                  className="absolute left-0 right-0 top-0 z-10 flex justify-center px-4 pt-4 md:px-8 md:pt-6"
+                  aria-live="polite"
+                >
+                  <div className="w-full max-w-3xl rounded-xl bg-surface-container-lowest/95 backdrop-blur-[2px] border border-outline-variant/20 p-4 md:p-5 shadow-ambient space-y-3 transition-opacity duration-300 ease-out">
+                    <p className="text-sm font-semibold text-primary font-headline">
+                      {pendingRequest === "followup_round_2"
+                        ? "Evaluating your answers…"
+                        : "Analyzing your responses…"}
+                    </p>
+                    <LinearLoadingBar
+                      estimatedSeconds={30}
+                      label={
+                        pendingRequest === "followup_round_2"
+                          ? "Evaluating your answers"
+                          : "Analyzing your responses"
+                      }
+                      progress={
+                        pendingRequest === "followup_round_2" ? roundTwoRequestProgress : resultsProgress
+                      }
+                    />
+                  </div>
+                </div>
               ) : null}
-
-              <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
-                <button
-                  className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
-                  type="button"
-                  onClick={() => {
-                    setStep("intake");
-                    setFollowUpQuestions([]);
-                    setFollowUpAnswers({});
-                    setLlmError(null);
-                  }}
-                >
-                  Back
-                </button>
-                <button
-                  className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
-                  disabled={!followUpValid || pendingRequest !== null}
-                  type="button"
-                  onClick={() => void handleCheckAndProceed()}
-                >
-                  {pendingRequest === "followup_round_2" || pendingRequest === "results" ? "Evaluating…" : "Continue"}
-                  <span className="material-symbols-outlined text-lg">monitoring</span>
-                </button>
-              </div>
-            </section>
+            </div>
           </div>
         )}
 
         {step === "followup_round_2" && (
           <div className="space-y-6">
-            <div className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3">
+            <div
+              className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
+                resultsLoading ? "opacity-40" : "opacity-100"
+              }`}
+            >
               <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
               <div>
-                <h3 className="text-sm font-bold text-primary mb-1 font-headline">Additional clarifying questions</h3>
+                <h3 className="text-sm font-bold text-primary mb-1 font-headline">
+                  Additional clarifying questions
+                </h3>
                 <p className="text-sm text-on-surface-variant font-body leading-relaxed">
-                  Based on your answers, we need a bit more detail to better narrow down the
-                  assessment. Please answer these additional questions.
+                  Based on your answers, we need a bit more detail to narrow the illustrative
+                  assessment. Please answer the questions below.
                 </p>
               </div>
             </div>
 
-            <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
-              <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">quiz</span>
-                Additional questions
-              </h2>
+            <div className="relative">
+              <section
+                className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
+                  resultsLoading ? "opacity-35 pointer-events-none" : "opacity-100"
+                }`}
+              >
+                <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">quiz</span>
+                  Additional questions
+                </h2>
 
-              <div className="space-y-10">
-                {secondFollowUpQuestions.map((question) => renderSecondRoundQuestion(question))}
-              </div>
+                <div className="space-y-10">
+                  {secondFollowUpQuestions.map((question) => renderSecondRoundQuestion(question))}
+                </div>
 
-              {llmError ? (
-                <p className="mt-8 text-sm text-error font-body" role="alert">
-                  {llmError}
-                </p>
+                {llmError ? (
+                  <p className="mt-8 text-sm text-error font-body" role="alert">
+                    {llmError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
+                  <button
+                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    type="button"
+                    onClick={() => {
+                      setStep("followup");
+                      setSecondFollowUpQuestions([]);
+                      setSecondFollowUpAnswers({});
+                      setLlmError(null);
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="cursor-pointer gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed sm:ml-auto"
+                    disabled={!secondFollowUpValid || resultsLoading}
+                    type="button"
+                    onClick={() => void handleSeeResults()}
+                  >
+                    {resultsLoading ? "Analyzing responses…" : "See results"}
+                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                  </button>
+                </div>
+              </section>
+
+              {resultsLoading ? (
+                <div
+                  className="absolute left-0 right-0 top-0 z-10 flex justify-center px-4 pt-4 md:px-8 md:pt-6"
+                  aria-live="polite"
+                >
+                  <div className="w-full max-w-3xl rounded-xl bg-surface-container-lowest/95 backdrop-blur-[2px] border border-outline-variant/20 p-4 md:p-5 shadow-ambient space-y-3 transition-opacity duration-300 ease-out">
+                    <p className="text-sm font-semibold text-primary font-headline">
+                      Analyzing your responses…
+                    </p>
+                    <LinearLoadingBar
+                      estimatedSeconds={30}
+                      label="Analyzing your responses"
+                      progress={resultsProgress}
+                    />
+                  </div>
+                </div>
               ) : null}
-
-              <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
-                <button
-                  className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
-                  type="button"
-                  onClick={() => {
-                    setStep("followup");
-                    setSecondFollowUpQuestions([]);
-                    setSecondFollowUpAnswers({});
-                    setLlmError(null);
-                  }}
-                >
-                  Back
-                </button>
-                <button
-                  className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
-                  disabled={!secondFollowUpValid || pendingRequest !== null}
-                  type="button"
-                  onClick={() => void handleSeeResults()}
-                >
-                  {pendingRequest === "results" ? "Analyzing responses…" : "See results"}
-                  <span className="material-symbols-outlined text-lg">monitoring</span>
-                </button>
-              </div>
-            </section>
+            </div>
           </div>
         )}
 
         {step === "results" && results && (
-          <div className="space-y-8">
+          <div
+            className={`space-y-8 transition-opacity duration-500 ease-out ${
+              resultsEntered ? "opacity-100" : "opacity-0"
+            }`}
+          >
             <div className="bg-error-container/40 border border-error-container/50 rounded-xl p-5 flex gap-3 items-start">
               <span
                 className="material-symbols-outlined text-on-error-container shrink-0"
@@ -956,27 +1718,123 @@ const SymptomCheckPage: React.FC = () => {
             </section>
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
-              <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+              <h2 className="text-xl font-headline font-bold text-primary mb-2 flex items-center gap-2">
                 <span className="material-symbols-outlined text-secondary">local_hospital</span>
                 Nearby hospitals
               </h2>
-              <ul className="space-y-4">
-                {MOCK_HOSPITALS.map((h) => (
-                  <li
-                    key={h.name}
-                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-surface rounded-xl p-4 border border-outline-variant/15"
-                  >
-                    <div>
-                      <p className="font-headline font-bold text-on-surface">{h.name}</p>
-                      <p className="text-sm text-on-surface-variant font-body mt-1">{h.address}</p>
-                    </div>
-                    <div className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md self-start sm:self-center">
-                      <span className="material-symbols-outlined text-base">near_me</span>
-                      {h.distance}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed">
+                Order is <strong className="text-on-surface">relevance-aware</strong>: we combine
+                straight-line distance with a heuristic score from the public NPI directory (name
+                keywords, facility type, and multi-site signals). Patient reviews are{" "}
+                <strong className="text-on-surface">not</strong> in that registry—so farther
+                listings can rank higher when they look like established care sites.
+              </p>
+              {nearbyTaxonomyUsed ? (
+                <p className="text-xs text-on-surface-variant font-body mb-4">
+                  Directory search used NUCC taxonomy code{" "}
+                  <span className="font-mono text-on-surface">{nearbyTaxonomyUsed}</span> from your
+                  assessment.
+                </p>
+              ) : null}
+
+              {nearbyLoading ? (
+                <p className="text-sm text-on-surface-variant font-body">Loading nearby facilities…</p>
+              ) : null}
+
+              {nearbyError ? (
+                <p className="text-sm text-error font-body" role="alert">
+                  {nearbyError}
+                </p>
+              ) : null}
+
+              {!nearbyLoading && !nearbyError && nearbyFacilities && nearbyFacilities.length === 0 ? (
+                <p className="text-sm text-on-surface-variant font-body">
+                  No facilities matched this search. Try adjusting your ZIP or try again later.
+                </p>
+              ) : null}
+
+              {!nearbyLoading && !nearbyError && nearbyFacilities && nearbyFacilities.length > 0 ? (
+                <div className="space-y-4">
+                  <ul className="space-y-4">
+                    {nearbyFacilities.slice(0, 3).map((h) => (
+                      <li
+                        key={h.npi}
+                        className="flex flex-col gap-3 bg-surface rounded-xl p-4 border border-outline-variant/15"
+                      >
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div>
+                            <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                            <p className="text-sm text-on-surface-variant font-body mt-1">
+                              {h.address_line}
+                            </p>
+                            <p className="text-xs text-on-surface-variant/85 font-body mt-1">
+                              {facilityListingFitLabel(h.relevance_score)}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                            <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
+                              <span className="material-symbols-outlined text-base">near_me</span>
+                              {h.distance_label}
+                            </span>
+                            <a
+                              className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
+                              href={buildGoogleMapsUrl(h.address_line)}
+                              rel="noreferrer"
+                              target="_blank"
+                            >
+                              <span className="material-symbols-outlined text-base">map</span>
+                              Maps
+                            </a>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+
+                  {nearbyFacilities.length > 3 ? (
+                    <details className="rounded-xl border border-outline-variant/15 bg-surface px-4 py-3">
+                      <summary className="cursor-pointer text-sm font-semibold text-primary font-headline">
+                        Show more facilities ({nearbyFacilities.length - 3} more)
+                      </summary>
+                      <ul className="mt-4 space-y-4">
+                        {nearbyFacilities.slice(3).map((h) => (
+                          <li
+                            key={h.npi}
+                            className="flex flex-col gap-3 border-t border-outline-variant/10 pt-4 first:border-t-0 first:pt-0"
+                          >
+                            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                              <div>
+                                <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                                <p className="text-sm text-on-surface-variant font-body mt-1">
+                                  {h.address_line}
+                                </p>
+                                <p className="text-xs text-on-surface-variant/85 font-body mt-1">
+                                  {facilityListingFitLabel(h.relevance_score)}
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                                <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
+                                  <span className="material-symbols-outlined text-base">near_me</span>
+                                  {h.distance_label}
+                                </span>
+                                <a
+                                  className="inline-flex items-center gap-1 text-sm font-semibold text-primary border border-primary/30 rounded-md px-3 py-1.5 hover:bg-primary-fixed/10 transition-colors"
+                                  href={buildGoogleMapsUrl(h.address_line)}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  <span className="material-symbols-outlined text-base">map</span>
+                                  Maps
+                                </a>
+                              </div>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ) : null}
+                </div>
+              ) : null}
             </section>
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
@@ -985,37 +1843,28 @@ const SymptomCheckPage: React.FC = () => {
                 Estimated cost context
               </h2>
               <p className="text-sm text-on-surface-variant font-body mb-6">
-                Illustrative ranges for{" "}
-                <strong className="text-on-surface">{insurerLabel}</strong> at each facility, using
-                the same type of visit as an example.
+                Illustrative guidance for <strong className="text-on-surface">{insurerLabel}</strong>{" "}
+                — not tied to the facilities listed above until billing integration is enabled.
               </p>
-              <div className="space-y-6">
-                {MOCK_HOSPITALS.map((h) => (
-                  <article
-                    key={h.name}
-                    className="bg-surface rounded-xl p-5 border border-outline-variant/15"
-                  >
-                    <h3 className="font-headline text-base font-bold text-on-surface mb-3">{h.name}</h3>
-                    {buildCostNarrative(insurerLabel, h)
-                      .split("\n\n")
-                      .map((para, i) => (
-                        <p
-                          key={i}
-                          className={`text-sm text-on-surface font-body leading-relaxed ${
-                            i > 0 ? "mt-3 text-on-surface-variant" : ""
-                          }`}
-                        >
-                          {para}
-                        </p>
-                      ))}
-                  </article>
-                ))}
-              </div>
+              <article className="bg-surface rounded-xl p-5 border border-outline-variant/15">
+                {buildGenericCostNarrative(insurerLabel)
+                  .split("\n\n")
+                  .map((para, i) => (
+                    <p
+                      key={i}
+                      className={`text-sm text-on-surface font-body leading-relaxed ${
+                        i > 0 ? "mt-3 text-on-surface-variant" : ""
+                      }`}
+                    >
+                      {para}
+                    </p>
+                  ))}
+              </article>
             </section>
 
             <div className="flex flex-wrap gap-3 justify-center">
               <button
-                className="gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all"
+                className="cursor-pointer gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all"
                 type="button"
                 onClick={restart}
               >

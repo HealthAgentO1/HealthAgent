@@ -11,7 +11,11 @@ from .views import (
     UserSymptomSessionRetrieveView,
     UserSymptomSessionsListView,
 )
-from .views_symptom import SymptomChatView, SymptomSurveyLlmView
+from .views_symptom import (
+    SymptomChatView,
+    SymptomNearbyFacilitiesView,
+    SymptomSurveyLlmView,
+)
 
 router = DefaultRouter()
 router.register(r"items", ExampleItemViewSet)
@@ -27,6 +31,11 @@ urlpatterns = [
     path("symptom/chat/", SymptomChatView.as_view(), name="symptom-chat"),
     # Symptom Check SPA: two-phase JSON LLM (follow-up questions + condition list)
     path("symptom/survey-llm/", SymptomSurveyLlmView.as_view(), name="symptom-survey-llm"),
+    path(
+        "symptom/nearby-facilities/",
+        SymptomNearbyFacilitiesView.as_view(),
+        name="symptom-nearby-facilities",
+    ),
     path("providers/", ProvidersView.as_view(), name="providers"),
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
