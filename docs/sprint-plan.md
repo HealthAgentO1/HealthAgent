@@ -63,20 +63,20 @@ Same approach — all four move to this feature together.
 
 **Backend:**
 
-- [ ] Lexigram medication extraction from free text
-- [ ] openFDA drug label + interaction lookup
-- [ ] Interaction risk scoring (critical / moderate / low)
-- [ ] openFDA recall check
-- [ ] Safer alternatives logic
-- [ ] Alert notification stub (email log or webhook)
-- [ ] `/api/medication/check/` endpoint returning full shaped response
+- [ ] Lexigram medication extraction from free text (Nico) — [#37](https://github.com/HealthAgentO1/HealthAgent/issues/37)
+- [ ] openFDA drug label + interaction lookup (Carl) — [#38](https://github.com/HealthAgentO1/HealthAgent/issues/38)
+- [ ] Interaction risk scoring (critical / moderate / low) (Peter) — [#40](https://github.com/HealthAgentO1/HealthAgent/issues/40)
+- [ ] openFDA recall check (Nico) — [#39](https://github.com/HealthAgentO1/HealthAgent/issues/39)
+- [ ] Safer alternatives logic (Peter) — [#40](https://github.com/HealthAgentO1/HealthAgent/issues/40)
+- [ ] Alert notification stub (email log or webhook) (Peter) — [#40](https://github.com/HealthAgentO1/HealthAgent/issues/40)
+- [ ] `/api/medication/check/` endpoint returning full shaped response (Carl) — [#41](https://github.com/HealthAgentO1/HealthAgent/issues/41)
 
 **Frontend:**
 
-- [ ] Medication input form (free text)
-- [ ] Alert cards by severity (critical / moderate / low)
-- [ ] Safer alternatives display
-- [ ] Recall warning display
+- [ ] Medication input form (free text) (Zander) — [#42](https://github.com/HealthAgentO1/HealthAgent/issues/42)
+- [ ] Alert cards by severity (critical / moderate / low) (Zander) — [#43](https://github.com/HealthAgentO1/HealthAgent/issues/43)
+- [ ] Safer alternatives display (Zander) — [#43](https://github.com/HealthAgentO1/HealthAgent/issues/43)
+- [ ] Recall warning display (Zander) — [#43](https://github.com/HealthAgentO1/HealthAgent/issues/43)
 
 **Done when:** A user can enter their medications, see a risk-scored list of interactions and recalls, and view safer alternatives — fully working in the browser.
 

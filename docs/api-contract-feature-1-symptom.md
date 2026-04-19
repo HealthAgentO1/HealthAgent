@@ -1,7 +1,7 @@
 # API contract — Feature 1 (Symptom-to-Care)
 
 **Status:** Draft (pre-implementation)  
-**Version:** 1.0.2  
+**Version:** 1.0.3  
 **Base URL (dev):** `http://127.0.0.1:8000/api`  
 **Primary consumer:** React frontend (`VITE_API_URL` + Axios)
 
@@ -11,6 +11,8 @@ This document defines the HTTP contract for the symptom interview, triage submis
 
 **Symptom Check survey LLM:** The `/symptom-check` UI issues two `POST /api/symptom/survey-llm/` calls (authenticated). The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from `POST /symptom/chat/` (conversational JSON contract below).
 
+**Symptom Check nearby facilities:** After the second LLM call, the SPA issues **`POST /api/symptom/nearby-facilities/`** with the user’s address and NUCC `taxonomy_codes` from `care_taxonomy` (see section 4).
+
 ---
 
 ## Conventions
@@ -19,7 +21,7 @@ This document defines the HTTP contract for the symptom interview, triage submis
 |------|------|
 | Format | `Content-Type: application/json` on bodies |
 | Paths | All paths below are relative to the API prefix `/api/` (e.g. full path `POST /api/symptom/chat/`) |
-| Auth | JWT: clients send `Authorization: Bearer <access_token>` when present. **`POST /symptom/survey-llm/`** and **`POST /symptom/chat/`** require authentication in the current implementation. |
+| Auth | JWT: clients send `Authorization: Bearer <access_token>` when present. **`POST /symptom/survey-llm/`**, **`POST /symptom/nearby-facilities/`**, and **`POST /symptom/chat/`** require authentication in the current implementation. |
 | IDs | `session_id` is a UUID string |
 | Timestamps | ISO-8601 UTC strings where present (e.g. `2026-04-18T12:34:56Z`) |
 
@@ -232,11 +234,78 @@ Submits the **full session** for structured triage: urgency, routing guidance, a
 
 ---
 
-## 4. NPPES provider proxy
+## 4. Symptom Check nearby facilities (implemented)
+
+**`POST /symptom/nearby-facilities/`**
+
+Authenticated JSON endpoint that searches the CMS NPI Registry for **organizational** providers (`NPI-2`) near the user’s ZIP, filtered by **NUCC taxonomy code**, ranks candidates by **distance** after US Census geocoding, and returns normalized rows for the React results step.
+
+### Request
+
+```json
+{
+  "street": "100 Congress Ave",
+  "city": "Austin",
+  "state": "TX",
+  "postal_code": "78701",
+  "taxonomy_codes": ["282N00000X", "261QU0200X"],
+  "suggested_care_setting": "emergency_department"
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|--------|
+| `street` | string | yes | Non-empty; trimmed |
+| `city` | string | yes | Non-empty |
+| `state` | string | yes | US state/DC USPS code, e.g. `TX` |
+| `postal_code` | string | yes | Exactly **5** digits |
+| `taxonomy_codes` | string[] | yes | May be empty; server filters to an allowlist of facility NUCC codes and orders attempts using `suggested_care_setting` |
+| `suggested_care_setting` | string | no | `emergency_department` \| `urgent_care` \| `primary_care` \| `telehealth` \| `self_care_monitor` — when omitted, a default ordering is used |
+
+### Response **200 OK**
+
+```json
+{
+  "facilities": [
+    {
+      "npi": "1234567890",
+      "name": "Example Medical Center",
+      "address_line": "1 Main St, Austin, TX 78701",
+      "distance_miles": 1.234,
+      "distance_label": "1.2 mi",
+      "taxonomy_code": "282N00000X",
+      "taxonomy_description": "General Acute Care Hospital",
+      "relevance_score": 14.5
+    }
+  ],
+  "taxonomy_used": "282N00000X"
+}
+```
+
+| Field | Type | Notes |
+|-------|------|--------|
+| `facilities` | array | Sorted by **combined** relevance and distance (see `relevance_score`), not raw miles alone |
+| `facilities[].npi` | string | 10-digit NPI |
+| `facilities[].relevance_score` | number | Heuristic 0+ from NPI name/taxonomy/org signals (registry has no star ratings) |
+| `taxonomy_used` | string \| null | NUCC code that produced non-empty NPPES results (after trying the request list and optional fallback) |
+
+### Errors
+
+| HTTP | When |
+|------|------|
+| **400** | Validation (serializer) or business rule (`detail` string), e.g. Census could not geocode the user address, or no facilities after search |
+| **401** | Missing or invalid JWT |
+| **502** | Unexpected failure talking to NPPES/Census or internal error |
+
+---
+
+## 5. NPPES provider proxy (draft)
 
 **`GET /providers/`**
 
 Proxies / normalizes the CMS NPI Registry for the UI (see [NPI Registry API](https://npiregistry.cms.hhs.gov/api-page)). Reduces CORS and encapsulates query shaping.
+
+**Implementation note:** Symptom Check currently uses **`POST /symptom/nearby-facilities/`** (section 4) for facility search; this `GET` remains a draft if a generic provider list endpoint is added later.
 
 ### Query parameters
 
@@ -295,3 +364,4 @@ All developers MUST review this contract before Feature 1 implementation. Record
 | 1.0 | 2026-04-18 | Initial contract for chat, triage, and providers endpoints |
 | 1.0.1 | 2026-04-18 | Documented parallel frontend Symptom Check LLM payload (`VITE_SYMPTOM_LLM_URL`, prompt files); clarifies relation to draft `/symptom/chat/` and `/symptom/triage/` |
 | 1.0.2 | 2026-04-18 | Added implemented `POST /symptom/survey-llm/`; SPA uses Django + JWT (removed browser-only mock path) |
+| 1.0.3 | 2026-04-18 | Documented implemented `POST /symptom/nearby-facilities/` (NPPES + Census via Django) for Symptom Check results |

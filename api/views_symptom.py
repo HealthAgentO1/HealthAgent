@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import SymptomSession
+from .services.nppes_nearby import find_nearby_facilities
 from .services.report_service import build_pre_visit_report
 from .services.survey_session_persist import (
     append_survey_turn,
@@ -24,10 +25,100 @@ from .services.symptom_llm import (
 
 logger = logging.getLogger(__name__)
 
+# US postal state abbreviations (50 states + DC) — used to validate intake addresses.
+US_STATE_CODES = frozenset(
+    {
+        "AL",
+        "AK",
+        "AZ",
+        "AR",
+        "CA",
+        "CO",
+        "CT",
+        "DE",
+        "DC",
+        "FL",
+        "GA",
+        "HI",
+        "ID",
+        "IL",
+        "IN",
+        "IA",
+        "KS",
+        "KY",
+        "LA",
+        "ME",
+        "MD",
+        "MA",
+        "MI",
+        "MN",
+        "MS",
+        "MO",
+        "MT",
+        "NE",
+        "NV",
+        "NH",
+        "NJ",
+        "NM",
+        "NY",
+        "NC",
+        "ND",
+        "OH",
+        "OK",
+        "OR",
+        "PA",
+        "RI",
+        "SC",
+        "SD",
+        "TN",
+        "TX",
+        "UT",
+        "VT",
+        "VA",
+        "WA",
+        "WV",
+        "WI",
+        "WY",
+    }
+)
+
 
 class SymptomChatRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
     message = serializers.CharField(min_length=1, max_length=20000)
+
+
+class SymptomNearbyFacilitiesSerializer(serializers.Serializer):
+    """
+    Symptom Check step 3: location + NUCC taxonomy codes from the LLM drive NPPES lookup.
+    `suggested_care_setting` orders and filters codes server-side (see `taxonomy_routing.py`).
+    """
+
+    street = serializers.CharField(min_length=1, max_length=240, trim_whitespace=True)
+    city = serializers.CharField(min_length=1, max_length=120, trim_whitespace=True)
+    state = serializers.CharField(min_length=2, max_length=2, trim_whitespace=True)
+    postal_code = serializers.RegexField(r"^\d{5}$")
+    taxonomy_codes = serializers.ListField(
+        child=serializers.CharField(max_length=32),
+        allow_empty=True,
+    )
+    suggested_care_setting = serializers.ChoiceField(
+        choices=[
+            "emergency_department",
+            "urgent_care",
+            "primary_care",
+            "telehealth",
+            "self_care_monitor",
+        ],
+        required=False,
+        allow_null=True,
+    )
+
+    def validate_state(self, value: str) -> str:
+        v = value.strip().upper()
+        if v not in US_STATE_CODES:
+            raise serializers.ValidationError("Enter a valid US state.")
+        return v
 
 
 class SymptomSurveyLlmSerializer(serializers.Serializer):
@@ -36,7 +127,9 @@ class SymptomSurveyLlmSerializer(serializers.Serializer):
     `frontend/src/symptomCheck/prompts/*.txt` plus JSON user_payload for the model.
     """
 
-    phase = serializers.ChoiceField(choices=["followup_questions", "condition_assessment"])
+    phase = serializers.ChoiceField(
+        choices=["followup_questions", "followup_questions_round_2", "condition_assessment"]
+    )
     system_prompt = serializers.CharField(min_length=1, max_length=200_000)
     user_payload = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
@@ -216,3 +309,42 @@ class SymptomSurveyLlmView(APIView):
                 "session_id": str(session.public_id),
             }
         )
+
+
+class SymptomNearbyFacilitiesView(APIView):
+    """
+    Authenticated proxy for CMS NPPES + Census geocoding (see `api/services/nppes_nearby.py`).
+    Mirrors the pattern used for `SymptomSurveyLlmView`: browser calls Django; Django calls public APIs.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        ser = SymptomNearbyFacilitiesSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        street = ser.validated_data["street"].strip()
+        city = ser.validated_data["city"].strip()
+        state = ser.validated_data["state"]
+        postal_code = ser.validated_data["postal_code"]
+        taxonomy_codes = ser.validated_data["taxonomy_codes"] or []
+        suggested_care_setting = ser.validated_data.get("suggested_care_setting")
+
+        try:
+            payload = find_nearby_facilities(
+                street=street,
+                city=city,
+                state=state,
+                postal_code=postal_code,
+                taxonomy_codes=list(taxonomy_codes),
+                suggested_care_setting=suggested_care_setting,
+            )
+        except ValueError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Nearby facilities lookup failed")
+            return Response(
+                {"detail": "Unable to load nearby facilities. Please try again."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(payload, status=status.HTTP_200_OK)
