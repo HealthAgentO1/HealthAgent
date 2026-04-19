@@ -6,6 +6,7 @@ from users.views import RegisterView
 
 from .views import (
     ExampleItemViewSet,
+    MedicationRecallsView,
     ProvidersView,
     SymptomSessionViewSet,
     UserSymptomSessionRetrieveView,
@@ -28,6 +29,11 @@ urlpatterns = [
     # Symptom Check SPA: two-phase JSON LLM (follow-up questions + condition list)
     path("symptom/survey-llm/", SymptomSurveyLlmView.as_view(), name="symptom-survey-llm"),
     path("providers/", ProvidersView.as_view(), name="providers"),
+    path(
+        "medications/recalls/",
+        MedicationRecallsView.as_view(),
+        name="medication-recalls",
+    ),
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
     path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
