@@ -350,11 +350,11 @@ const ReportsPage: React.FC = () => {
                         {pdfBusy ? "Preparing…" : "Download PDF"}
                       </button>
                       <Link
-                        className="inline-flex items-center gap-1 font-body text-sm font-semibold text-primary border border-outline-variant/40 rounded-lg py-2 px-4 hover:bg-surface-container-high/80 transition-colors min-w-0"
+                        className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-outline-variant/40 px-4 py-2 font-body text-sm font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
                         to={`/symptom-check?session=${encodeURIComponent(selected.session_id)}`}
                       >
-                        <span className="truncate">Open in Symptom Check</span>
-                        <span className="material-symbols-outlined text-lg leading-none shrink-0">arrow_forward</span>
+                        Open in Symptom Check
+                        <span className="material-symbols-outlined shrink-0 text-lg leading-none">arrow_forward</span>
                       </Link>
                       <button
                         type="button"
