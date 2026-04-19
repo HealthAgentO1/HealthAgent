@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAxiosError } from "axios";
+import { isValidEmailFormat, registerFormCanSubmit } from "../utils/authCredentialsValidation";
 
 const RegisterPage = () => {
   const { register } = useAuth();
@@ -13,17 +14,46 @@ const RegisterPage = () => {
   const [lastName, setLastName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [firstBlurred, setFirstBlurred] = useState(false);
+  const [lastBlurred, setLastBlurred] = useState(false);
+  const [emailBlurred, setEmailBlurred] = useState(false);
+  const [passwordBlurred, setPasswordBlurred] = useState(false);
+
+  const firstError =
+    firstBlurred && !firstName.trim() ? "Enter your first name." : null;
+  const lastError = lastBlurred && !lastName.trim() ? "Enter your last name." : null;
+
+  const emailError =
+    emailBlurred && !email.trim()
+      ? "Enter your email."
+      : emailBlurred && !isValidEmailFormat(email)
+        ? "Enter a valid email address."
+        : null;
+
+  const passwordError =
+    passwordBlurred && password.length < 8
+      ? "Password must be at least 8 characters."
+      : null;
+
+  const canSubmit = registerFormCanSubmit(firstName, lastName, email, password);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!registerFormCanSubmit(firstName, lastName, email, password)) {
+      setFirstBlurred(true);
+      setLastBlurred(true);
+      setEmailBlurred(true);
+      setPasswordBlurred(true);
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
       await register({
         email: email.trim(),
         password,
-        first_name: firstName.trim() || undefined,
-        last_name: lastName.trim() || undefined,
+        first_name: firstName.trim(),
+        last_name: lastName.trim(),
       });
       navigate("/", { replace: true });
     } catch (err) {
@@ -67,7 +97,7 @@ const RegisterPage = () => {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 font-body">
+        <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4 font-body">
           {error && (
             <div
               className="rounded-lg bg-error-container text-on-error-container text-sm px-3 py-2 border border-error/20"
@@ -83,15 +113,26 @@ const RegisterPage = () => {
                 className="block text-sm font-semibold text-on-surface mb-1"
               >
                 First name
+                <span className="text-error ml-1" aria-hidden>
+                  *
+                </span>
               </label>
               <input
                 id="reg-first"
                 type="text"
                 autoComplete="given-name"
+                aria-invalid={Boolean(firstError)}
+                aria-required
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
+                onBlur={() => setFirstBlurred(true)}
                 className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
               />
+              {firstError ? (
+                <p className="mt-1 text-xs text-error font-body" role="alert">
+                  {firstError}
+                </p>
+              ) : null}
             </div>
             <div>
               <label
@@ -99,15 +140,26 @@ const RegisterPage = () => {
                 className="block text-sm font-semibold text-on-surface mb-1"
               >
                 Last name
+                <span className="text-error ml-1" aria-hidden>
+                  *
+                </span>
               </label>
               <input
                 id="reg-last"
                 type="text"
                 autoComplete="family-name"
+                aria-invalid={Boolean(lastError)}
+                aria-required
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
+                onBlur={() => setLastBlurred(true)}
                 className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
               />
+              {lastError ? (
+                <p className="mt-1 text-xs text-error font-body" role="alert">
+                  {lastError}
+                </p>
+              ) : null}
             </div>
           </div>
           <div>
@@ -116,16 +168,27 @@ const RegisterPage = () => {
               className="block text-sm font-semibold text-on-surface mb-1"
             >
               Email
+              <span className="text-error ml-1" aria-hidden>
+                *
+              </span>
             </label>
             <input
               id="reg-email"
-              type="email"
+              type="text"
+              inputMode="email"
               autoComplete="email"
-              required
+              aria-invalid={Boolean(emailError)}
+              aria-required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onBlur={() => setEmailBlurred(true)}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
             />
+            {emailError ? (
+              <p className="mt-1 text-xs text-error font-body" role="alert">
+                {emailError}
+              </p>
+            ) : null}
           </div>
           <div>
             <label
@@ -133,25 +196,34 @@ const RegisterPage = () => {
               className="block text-sm font-semibold text-on-surface mb-1"
             >
               Password
+              <span className="text-error ml-1" aria-hidden>
+                *
+              </span>
             </label>
             <input
               id="reg-password"
               type="password"
               autoComplete="new-password"
-              required
-              minLength={8}
+              aria-invalid={Boolean(passwordError)}
+              aria-required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onBlur={() => setPasswordBlurred(true)}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
             />
             <p className="text-xs text-on-surface-variant mt-1">
               At least 8 characters
             </p>
+            {passwordError ? (
+              <p className="mt-1 text-xs text-error font-body" role="alert">
+                {passwordError}
+              </p>
+            ) : null}
           </div>
           <button
             type="submit"
-            disabled={submitting}
-            className="mt-2 w-full rounded-lg bg-primary-container py-3 font-headline font-bold text-on-primary-container hover:opacity-95 disabled:opacity-60 transition-opacity"
+            disabled={submitting || !canSubmit}
+            className="mt-2 w-full rounded-lg bg-primary-container py-3 font-headline font-bold text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-opacity"
           >
             {submitting ? "Creating account…" : "Create account"}
           </button>

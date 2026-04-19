@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { getBroadcastEligibility } from "../api/broadcastEligibility";
 import { useAuth } from "../context/AuthContext";
+import { isValidEmailFormat, loginFormCanSubmit } from "../utils/authCredentialsValidation";
 
 const LoginPage = () => {
   const { login } = useAuth();
@@ -20,9 +21,28 @@ const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [emailBlurred, setEmailBlurred] = useState(false);
+  const [passwordBlurred, setPasswordBlurred] = useState(false);
+
+  const emailError =
+    emailBlurred && !email.trim()
+      ? "Enter your email."
+      : emailBlurred && !isValidEmailFormat(email)
+        ? "Enter a valid email address."
+        : null;
+
+  const passwordError =
+    passwordBlurred && password.length === 0 ? "Enter your password." : null;
+
+  const canSubmit = loginFormCanSubmit(email, password);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    if (!loginFormCanSubmit(email, password)) {
+      setEmailBlurred(true);
+      setPasswordBlurred(true);
+      return;
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -76,7 +96,7 @@ const LoginPage = () => {
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 font-body">
+        <form noValidate onSubmit={handleSubmit} className="flex flex-col gap-4 font-body">
           {error && (
             <div
               className="rounded-lg bg-error-container text-on-error-container text-sm px-3 py-2 border border-error/20"
@@ -94,13 +114,20 @@ const LoginPage = () => {
             </label>
             <input
               id="login-email"
-              type="email"
+              type="text"
+              inputMode="email"
               autoComplete="email"
-              required
+              aria-invalid={Boolean(emailError)}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onBlur={() => setEmailBlurred(true)}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface placeholder:text-on-surface-variant focus:outline-none focus:ring-2 focus:ring-primary-container"
             />
+            {emailError ? (
+              <p className="mt-1 text-xs text-error font-body" role="alert">
+                {emailError}
+              </p>
+            ) : null}
           </div>
           <div>
             <label
@@ -113,16 +140,22 @@ const LoginPage = () => {
               id="login-password"
               type="password"
               autoComplete="current-password"
-              required
+              aria-invalid={Boolean(passwordError)}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onBlur={() => setPasswordBlurred(true)}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
             />
+            {passwordError ? (
+              <p className="mt-1 text-xs text-error font-body" role="alert">
+                {passwordError}
+              </p>
+            ) : null}
           </div>
           <button
             type="submit"
-            disabled={submitting}
-            className="mt-2 w-full rounded-lg bg-primary-container py-3 font-headline font-bold text-on-primary-container hover:opacity-95 disabled:opacity-60 transition-opacity"
+            disabled={submitting || !canSubmit}
+            className="mt-2 w-full rounded-lg bg-primary-container py-3 font-headline font-bold text-white hover:opacity-95 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer transition-opacity"
           >
             {submitting ? "Signing in…" : "Sign in"}
           </button>
