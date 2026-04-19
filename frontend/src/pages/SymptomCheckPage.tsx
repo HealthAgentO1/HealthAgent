@@ -1514,7 +1514,8 @@ const SymptomCheckPage: React.FC = () => {
 
                 <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
                   <button
-                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                    disabled={followupRound1Busy}
                     type="button"
                     onClick={() => {
                       setStep("intake");
@@ -1545,10 +1546,10 @@ const SymptomCheckPage: React.FC = () => {
 
               {followupRound1Busy ? (
                 <div
-                  className="absolute left-0 right-0 top-0 z-10 flex justify-center px-4 pt-4 md:px-8 md:pt-6"
+                  className="absolute inset-0 z-10 flex items-start justify-center rounded-xl bg-surface-container-lowest/92 backdrop-blur-[2px] border border-outline-variant/20 p-5 md:p-8 shadow-ambient transition-opacity duration-300 ease-out"
                   aria-live="polite"
                 >
-                  <div className="w-full max-w-3xl rounded-xl bg-surface-container-lowest/95 backdrop-blur-[2px] border border-outline-variant/20 p-4 md:p-5 shadow-ambient space-y-3 transition-opacity duration-300 ease-out">
+                  <div className="w-full max-w-3xl space-y-3">
                     <p className="text-sm font-semibold text-primary font-headline">
                       {pendingRequest === "followup_round_2"
                         ? "Evaluating your answers…"
@@ -1614,7 +1615,8 @@ const SymptomCheckPage: React.FC = () => {
 
                 <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
                   <button
-                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                    disabled={resultsLoading}
                     type="button"
                     onClick={() => {
                       setStep("followup");
@@ -1639,10 +1641,10 @@ const SymptomCheckPage: React.FC = () => {
 
               {resultsLoading ? (
                 <div
-                  className="absolute left-0 right-0 top-0 z-10 flex justify-center px-4 pt-4 md:px-8 md:pt-6"
+                  className="absolute inset-0 z-10 flex items-start justify-center rounded-xl bg-surface-container-lowest/92 backdrop-blur-[2px] border border-outline-variant/20 p-5 md:p-8 shadow-ambient transition-opacity duration-300 ease-out"
                   aria-live="polite"
                 >
-                  <div className="w-full max-w-3xl rounded-xl bg-surface-container-lowest/95 backdrop-blur-[2px] border border-outline-variant/20 p-4 md:p-5 shadow-ambient space-y-3 transition-opacity duration-300 ease-out">
+                  <div className="w-full max-w-3xl space-y-3">
                     <p className="text-sm font-semibold text-primary font-headline">
                       Analyzing your responses…
                     </p>

@@ -97,7 +97,7 @@ export async function requestSecondFollowUpQuestions(input: {
   symptoms: string;
   insuranceLabel: string;
   firstRoundAnswers: StructuredFollowUpAnswer[];
-  /** Same `SymptomSession.public_id` as round 1 so Django appends to one survey session. */
+  /** Same `SymptomSession.public_id` as round 1 so Django appends to one persisted survey session. */
   sessionId: string;
 }): Promise<FollowUpQuestionsPayload> {
   const body: SymptomLlmRequestBody = {
