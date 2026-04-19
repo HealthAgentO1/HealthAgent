@@ -6,42 +6,46 @@
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
  */
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { fetchSymptomSessionResume } from "../api/queries";
-import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { fetchSymptomSessionResume } from '../api/queries';
+import { LinearLoadingBar, useSimulatedProgress } from '../components/LinearLoadingBar';
 import type {
   FollowUpAnswer,
   FollowUpQuestion,
   PriceEstimatePayload,
   SymptomResultsPayload,
-} from "../symptomCheck/types";
-import { validateUserAddress, type UserAddress } from "../symptomCheck/addressValidation";
+} from '../symptomCheck/types';
+import {
+  validateUserAddress,
+  type UserAddress,
+} from '../symptomCheck/addressValidation';
 import {
   buildGoogleMapsUrl,
   requestNearbyFacilities,
   type NearbyFacility,
   type SymptomInsurerSlug,
-} from "../symptomCheck/nppesFacilitiesClient";
-import { priceEstimateCacheFingerprint } from "../symptomCheck/priceEstimateCache";
-import { PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS } from "../symptomCheck/priceEstimateStaticDisclaimer";
-import { parseJsonObjectFromLlm } from "../symptomCheck/parseLlmJson";
-import { US_STATE_OPTIONS, type UsStateCode } from "../symptomCheck/usStates";
+} from '../symptomCheck/nppesFacilitiesClient';
+import { priceEstimateCacheFingerprint } from '../symptomCheck/priceEstimateCache';
+import { PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS } from '../symptomCheck/priceEstimateStaticDisclaimer';
+import { parseJsonObjectFromLlm } from '../symptomCheck/parseLlmJson';
+import { US_STATE_OPTIONS, type UsStateCode } from '../symptomCheck/usStates';
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
   requestPriceEstimate,
   requestSecondFollowUpQuestions,
   type StructuredFollowUpAnswer,
-} from "../symptomCheck/symptomLlmClient";
-import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
+} from '../symptomCheck/symptomLlmClient';
+import type { FollowUpQuestionsWithSession } from '../symptomCheck/types';
 import {
+  MULTI_CHOICE_NONE_OF_ABOVE_ID,
   validateFollowUpQuestionsPayload,
   validatePriceEstimatePayload,
   validateSymptomResultsPayload,
-} from "../symptomCheck/validatePayloads";
-import { InsuranceCompanyLogo } from "../symptomCheck/InsuranceCompanyLogos";
+} from '../symptomCheck/validatePayloads';
+import { InsuranceCompanyLogo } from '../symptomCheck/InsuranceCompanyLogos';
 import {
   SYMPTOM_CHECK_SESSION_VERSION,
   clearSymptomCheckSession,
@@ -51,25 +55,25 @@ import {
   type SymptomCheckFlowStep,
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
-} from "../symptomCheck/symptomCheckSession";
+} from '../symptomCheck/symptomCheckSession';
 
 const INSURANCE_OPTIONS = [
-  { id: "centene", label: "Centene / Ambetter" },
-  { id: "cigna", label: "Cigna" },
-  { id: "healthnet", label: "Health Net" },
-  { id: "fidelis", label: "Fidelis Care" },
-  { id: "unitedhealthcare", label: "UnitedHealthcare" },
-  { id: "elevance", label: "Elevance Health (Anthem)" },
-  { id: "humana", label: "Humana" },
-  { id: "bluecross", label: "Blue Cross Blue Shield" },
-  { id: "aetna", label: "Aetna" },
-  { id: "other", label: "Other / not listed" },
+  { id: 'centene', label: 'Centene / Ambetter' },
+  { id: 'cigna', label: 'Cigna' },
+  { id: 'healthnet', label: 'Health Net' },
+  { id: 'fidelis', label: 'Fidelis Care' },
+  { id: 'unitedhealthcare', label: 'UnitedHealthcare' },
+  { id: 'elevance', label: 'Elevance Health (Anthem)' },
+  { id: 'humana', label: 'Humana' },
+  { id: 'bluecross', label: 'Blue Cross Blue Shield' },
+  { id: 'aetna', label: 'Aetna' },
+  { id: 'other', label: 'Other / not listed' },
 ] as const;
 
-type InsuranceId = (typeof INSURANCE_OPTIONS)[number]["id"];
+type InsuranceId = (typeof INSURANCE_OPTIONS)[number]['id'];
 
 /** Which address inputs have been blurred; errors show only after blur if still invalid. */
-type AddressFieldKey = "street" | "city" | "state" | "postalCode";
+type AddressFieldKey = 'street' | 'city' | 'state' | 'postalCode';
 
 const INITIAL_ADDRESS_BLURRED: Record<AddressFieldKey, boolean> = {
   street: false,
@@ -83,12 +87,12 @@ function insuranceLabel(id: InsuranceId): string {
 }
 
 /** Ensures persisted insurer ids still match the current option list. */
-function normalizeInsuranceId(id: string): InsuranceId | "" {
-  if (id === "") return "";
-  const legacy: Record<string, InsuranceId> = { wellcare: "elevance" };
+function normalizeInsuranceId(id: string): InsuranceId | '' {
+  if (id === '') return '';
+  const legacy: Record<string, InsuranceId> = { wellcare: 'elevance' };
   const mapped = legacy[id] ?? id;
   const found = INSURANCE_OPTIONS.find((o) => o.id === mapped);
-  return found ? found.id : "";
+  return found ? found.id : '';
 }
 
 /** Illustrative cost copy is not tied to specific facilities until billing integration lands. */
@@ -99,63 +103,63 @@ function buildGenericCostNarrative(insurerLabel: string): string {
 /** When the LLM is unavailable, show the legacy narrative in the same layout as a structured estimate. */
 function defaultPriceEstimateFallback(insurerLabel: string): PriceEstimatePayload {
   const parts = buildGenericCostNarrative(insurerLabel)
-    .split("\n\n")
+    .split('\n\n')
     .map((p) => p.trim())
     .filter(Boolean);
   return {
-    cost_range_label: "Varies widely (illustrative)",
-    cost_range_explanation: parts.join(" "),
+    cost_range_label: 'Varies widely (illustrative)',
+    cost_range_explanation: parts.join(' '),
   };
 }
 
 /** Buckets Django `relevance_score` (NPI registry heuristics; public reviews are not available there). */
 function facilityListingFitLabel(score: number): string {
-  if (score >= 10) return "Stronger directory match (name & facility type)";
-  if (score >= 5) return "Typical facility listing";
-  return "Weaker directory signals — confirm before visiting";
+  if (score >= 10) return 'Stronger directory match (name & facility type)';
+  if (score >= 5) return 'Typical facility listing';
+  return 'Weaker directory signals — confirm before visiting';
 }
 
 /** Coarse TIC file match — not eligibility. */
 function facilityNetworkBadge(h: NearbyFacility): { label: string; className: string } {
   if (h.in_network === true) {
     return {
-      label: "Likely in-network (file match)",
+      label: 'Likely in-network (file match)',
       className:
-        "inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-emerald-800/25 bg-emerald-500/12 text-emerald-950",
+        'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-emerald-800/25 bg-emerald-500/12 text-emerald-950',
     };
   }
   if (h.in_network === false) {
     return {
-      label: "Not listed in posted directory",
+      label: 'Not listed in posted directory',
       className:
-        "inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/40 bg-surface-container-low text-on-surface-variant",
+        'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/40 bg-surface-container-low text-on-surface-variant',
     };
   }
   return {
-    label: "Directory match n/a",
+    label: 'Directory match n/a',
     className:
-      "inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/25 bg-surface-container-lowest text-on-surface-variant",
+      'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/25 bg-surface-container-lowest text-on-surface-variant',
   };
 }
 
 /** Map insurer label from LLM payloads / resume API back to a known option id when possible. */
-function insuranceIdFromLabel(label: string): InsuranceId | "" {
+function insuranceIdFromLabel(label: string): InsuranceId | '' {
   const t = label.trim().toLowerCase();
-  if (!t) return "";
+  if (!t) return '';
   const legacy: Record<string, InsuranceId> = {
-    "united healthcare": "unitedhealthcare",
-    unitedhealthcare: "unitedhealthcare",
-    uhc: "unitedhealthcare",
-    elevance: "elevance",
-    anthem: "elevance",
-    aetna: "aetna",
-    "aetna cvs": "aetna",
-    "aetna cvs health": "aetna",
-    wellcare: "elevance",
-    bcbs: "bluecross",
-    "blue cross": "bluecross",
-    "blue shield": "bluecross",
-    "blue cross blue shield": "bluecross",
+    'united healthcare': 'unitedhealthcare',
+    unitedhealthcare: 'unitedhealthcare',
+    uhc: 'unitedhealthcare',
+    elevance: 'elevance',
+    anthem: 'elevance',
+    aetna: 'aetna',
+    'aetna cvs': 'aetna',
+    'aetna cvs health': 'aetna',
+    wellcare: 'elevance',
+    bcbs: 'bluecross',
+    'blue cross': 'bluecross',
+    'blue shield': 'bluecross',
+    'blue cross blue shield': 'bluecross',
   };
   if (legacy[t]) return legacy[t];
   for (const o of INSURANCE_OPTIONS) {
@@ -165,7 +169,7 @@ function insuranceIdFromLabel(label: string): InsuranceId | "" {
     const ol = o.label.toLowerCase();
     if (t.includes(ol) || ol.includes(t)) return o.id;
   }
-  return "";
+  return '';
 }
 
 function buildStructuredAnswers(
@@ -176,23 +180,40 @@ function buildStructuredAnswers(
     question_id: q.id,
     question_prompt: q.prompt,
     input_type: q.input_type,
-    value: answers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
+    value: answers[q.id] ?? (q.input_type === 'multi_choice' ? [] : ''),
   }));
 }
 
 /** Default control values so required validation and sliders start in a defined state. */
-function buildInitialAnswers(questions: FollowUpQuestion[]): Record<string, FollowUpAnswer> {
+/** Maps legacy `none` ids from persisted sessions to the canonical multi-select exclusive id. */
+function migrateLegacyMultiChoiceAnswers(
+  answers: Record<string, FollowUpAnswer>,
+  questions: FollowUpQuestion[],
+): Record<string, FollowUpAnswer> {
+  const out = { ...answers };
+  for (const q of questions) {
+    if (q.input_type !== 'multi_choice') continue;
+    const v = out[q.id];
+    if (!Array.isArray(v)) continue;
+    out[q.id] = v.map((id) => (id === 'none' ? MULTI_CHOICE_NONE_OF_ABOVE_ID : id));
+  }
+  return out;
+}
+
+function buildInitialAnswers(
+  questions: FollowUpQuestion[],
+): Record<string, FollowUpAnswer> {
   const out: Record<string, FollowUpAnswer> = {};
   for (const q of questions) {
-    if (q.input_type === "multi_choice") {
+    if (q.input_type === 'multi_choice') {
       out[q.id] = [];
-    } else if (q.input_type === "scale_1_10") {
+    } else if (q.input_type === 'scale_1_10') {
       const min = q.scale_min ?? 1;
       out[q.id] = min;
-    } else if (q.input_type === "text") {
-      out[q.id] = "";
+    } else if (q.input_type === 'text') {
+      out[q.id] = '';
     } else {
-      out[q.id] = "";
+      out[q.id] = '';
     }
   }
   return out;
@@ -206,14 +227,14 @@ function followUpAnswersSatisfy(
   for (const q of questions) {
     if (!q.required) continue;
     const v = answers[q.id];
-    if (q.input_type === "single_choice") {
-      if (typeof v !== "string" || v.trim() === "") return false;
-    } else if (q.input_type === "text") {
-      if (typeof v !== "string" || v.trim() === "") return false;
-    } else if (q.input_type === "multi_choice") {
+    if (q.input_type === 'single_choice') {
+      if (typeof v !== 'string' || v.trim() === '') return false;
+    } else if (q.input_type === 'text') {
+      if (typeof v !== 'string' || v.trim() === '') return false;
+    } else if (q.input_type === 'multi_choice') {
       if (!Array.isArray(v) || v.length === 0) return false;
-    } else if (q.input_type === "scale_1_10") {
-      if (typeof v !== "number" || !Number.isFinite(v)) return false;
+    } else if (q.input_type === 'scale_1_10') {
+      if (typeof v !== 'number' || !Number.isFinite(v)) return false;
     }
   }
   return true;
@@ -221,81 +242,96 @@ function followUpAnswersSatisfy(
 
 /** Tailwind bundles for overall / per-condition severity chips (mild | moderate | severe). */
 function severityStyles(level: string): string {
-  if (level === "severe") {
-    return "bg-error-container/40 text-on-error-container border border-red-800/40";
+  if (level === 'severe') {
+    return 'bg-error-container/40 text-on-error-container border border-red-800/40';
   }
-  if (level === "moderate") {
-    return "bg-orange-500/12 text-orange-800 border border-orange-400/35";
+  if (level === 'moderate') {
+    return 'bg-orange-500/12 text-orange-800 border border-orange-400/35';
   }
-  return "bg-teal-500/12 text-teal-800 border border-teal-400/35";
+  return 'bg-teal-500/12 text-teal-800 border border-teal-400/35';
 }
 
 /** App content scrolls inside `Layout`'s `<main>`; reset both so each flow step starts at the top. */
 function scrollAppToTop(): void {
   const run = () => {
-    document.querySelector("main")?.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    document.querySelector('main')?.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   };
   run();
   requestAnimationFrame(run);
 }
 
 /** Step 1 welcome vs questionnaire form (not persisted; URL session and resume skip welcome). */
-type IntakeSubstep = "welcome" | "form";
+type IntakeSubstep = 'welcome' | 'form';
 
 function initialIntakeSubstepFromLocation(): IntakeSubstep {
-  if (typeof window === "undefined") return "welcome";
-  if (new URLSearchParams(window.location.search).get("session")?.trim()) return "form";
-  return "welcome";
+  if (typeof window === 'undefined') return 'welcome';
+  if (new URLSearchParams(window.location.search).get('session')?.trim()) return 'form';
+  return 'welcome';
 }
 
 const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [step, setStep] = useState<SymptomCheckFlowStep>("intake");
-  const [intakeSubstep, setIntakeSubstep] = useState<IntakeSubstep>(initialIntakeSubstepFromLocation);
-  const [symptoms, setSymptoms] = useState("");
-  const [insurance, setInsurance] = useState<InsuranceId | "">("");
+  const [step, setStep] = useState<SymptomCheckFlowStep>('intake');
+  const [intakeSubstep, setIntakeSubstep] = useState<IntakeSubstep>(
+    initialIntakeSubstepFromLocation,
+  );
+  const [symptoms, setSymptoms] = useState('');
+  const [insurance, setInsurance] = useState<InsuranceId | ''>('');
   /** Step 1: practice location for NPPES distance ranking (mirrored to `symptomCheckSession`). */
   const [userAddress, setUserAddress] = useState<UserAddress>({
-    street: "",
-    city: "",
-    state: "",
-    postalCode: "",
+    street: '',
+    city: '',
+    state: '',
+    postalCode: '',
   });
-  const [addressFieldBlurred, setAddressFieldBlurred] =
-    useState<Record<AddressFieldKey, boolean>>(INITIAL_ADDRESS_BLURRED);
+  const [addressFieldBlurred, setAddressFieldBlurred] = useState<
+    Record<AddressFieldKey, boolean>
+  >(INITIAL_ADDRESS_BLURRED);
   // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
-  const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
-  const [secondFollowUpQuestions, setSecondFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
-  const [secondFollowUpAnswers, setSecondFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
+  const [followUpAnswers, setFollowUpAnswers] = useState<
+    Record<string, FollowUpAnswer>
+  >({});
+  const [secondFollowUpQuestions, setSecondFollowUpQuestions] = useState<
+    FollowUpQuestion[]
+  >([]);
+  const [secondFollowUpAnswers, setSecondFollowUpAnswers] = useState<
+    Record<string, FollowUpAnswer>
+  >({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
   /** Step 3: NPPES-backed facilities (relevance + distance on the server). */
-  const [nearbyFacilities, setNearbyFacilities] = useState<NearbyFacility[] | null>(null);
+  const [nearbyFacilities, setNearbyFacilities] = useState<NearbyFacility[] | null>(
+    null,
+  );
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [nearbyTaxonomyUsed, setNearbyTaxonomyUsed] = useState<string | null>(null);
   /** Illustrative cost from `price_estimate_context` LLM turn; null uses `defaultPriceEstimateFallback`. */
   const [priceEstimate, setPriceEstimate] = useState<PriceEstimatePayload | null>(null);
   /** When this matches `priceEstimateCacheFingerprint(session, results)`, we skip refetching the price LLM. */
-  const [priceEstimateCacheFingerprintState, setPriceEstimateCacheFingerprintState] = useState<
-    string | null
-  >(null);
+  const [priceEstimateCacheFingerprintState, setPriceEstimateCacheFingerprintState] =
+    useState<string | null>(null);
   const [priceEstimateLoading, setPriceEstimateLoading] = useState(false);
   /** Fades results content in after the LLM response lands. */
   const [resultsEntered, setResultsEntered] = useState(false);
   /** Tracks in-flight LLM phases for UI disable + session resume (see `symptomCheckSession`). */
-  const [pendingRequest, setPendingRequest] = useState<SymptomCheckPendingRequest>(null);
+  const [pendingRequest, setPendingRequest] =
+    useState<SymptomCheckPendingRequest>(null);
   /** Django `SymptomSession.public_id` after follow-up questions; sent with condition assessment. */
-  const [surveyBackendSessionId, setSurveyBackendSessionId] = useState<string | null>(null);
+  const [surveyBackendSessionId, setSurveyBackendSessionId] = useState<string | null>(
+    null,
+  );
   const [urlSessionHydrating, setUrlSessionHydrating] = useState(false);
   const [resumeChatNotice, setResumeChatNotice] = useState(false);
 
   const followUpMutation = useMutation({
-    mutationFn: (vars: { symptoms: string; insuranceLabel: string }): Promise<FollowUpQuestionsWithSession> =>
-      requestFollowUpQuestions(vars),
+    mutationFn: (vars: {
+      symptoms: string;
+      insuranceLabel: string;
+    }): Promise<FollowUpQuestionsWithSession> => requestFollowUpQuestions(vars),
   });
 
   const resultsMutation = useMutation({
@@ -311,31 +347,36 @@ const SymptomCheckPage: React.FC = () => {
   const resultsLoading = resultsMutation.isPending;
   const followUpProgress = useSimulatedProgress(followUpLoading);
   const resultsProgress = useSimulatedProgress(resultsLoading);
-  const roundTwoRequestProgress = useSimulatedProgress(pendingRequest === "followup_round_2");
+  const roundTwoRequestProgress = useSimulatedProgress(
+    pendingRequest === 'followup_round_2',
+  );
   const priceEstimateProgress = useSimulatedProgress(priceEstimateLoading);
 
   /**
    * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
    * `ready`: normal operation; state syncs to `localStorage`.
    */
-  const [sessionGate, setSessionGate] = useState<"need-choice" | "ready">(() => {
-    if (typeof window === "undefined") return "ready";
+  const [sessionGate, setSessionGate] = useState<'need-choice' | 'ready'>(() => {
+    if (typeof window === 'undefined') return 'ready';
     const params = new URLSearchParams(window.location.search);
-    if (params.get("session")?.trim()) return "ready";
+    if (params.get('session')?.trim()) return 'ready';
     const snap = readSymptomCheckSession();
-    if (snap && isRecoverableSymptomCheckSession(snap)) return "need-choice";
-    return "ready";
+    if (snap && isRecoverableSymptomCheckSession(snap)) return 'need-choice';
+    return 'ready';
   });
 
-  const addressValidation = useMemo(() => validateUserAddress(userAddress), [userAddress]);
+  const addressValidation = useMemo(
+    () => validateUserAddress(userAddress),
+    [userAddress],
+  );
 
   /** Deep link from dashboard: `?session=<uuid>` loads server state and skips the local resume modal. */
   useEffect(() => {
-    const sid = searchParams.get("session")?.trim();
+    const sid = searchParams.get('session')?.trim();
     if (!sid) return;
 
     let cancelled = false;
-    setSessionGate("ready");
+    setSessionGate('ready');
     setUrlSessionHydrating(true);
     setLlmError(null);
     setResumeChatNotice(false);
@@ -349,13 +390,13 @@ const SymptomCheckPage: React.FC = () => {
         if (cancelled) return;
 
         setSurveyBackendSessionId(sid);
-        setSymptoms(data.symptoms ?? "");
-        const resumedSlug = insuranceIdFromLabel(data.insurance_label ?? "");
+        setSymptoms(data.symptoms ?? '');
+        const resumedSlug = insuranceIdFromLabel(data.insurance_label ?? '');
         setInsurance(resumedSlug);
         setPendingRequest(null);
         setResultsEntered(false);
 
-        if (data.resume_step === "followup" && data.followup_raw_text) {
+        if (data.resume_step === 'followup' && data.followup_raw_text) {
           try {
             const parsed = parseJsonObjectFromLlm(data.followup_raw_text);
             const { questions } = validateFollowUpQuestionsPayload(parsed);
@@ -364,15 +405,15 @@ const SymptomCheckPage: React.FC = () => {
             setSecondFollowUpQuestions([]);
             setSecondFollowUpAnswers({});
             setResults(null);
-            setStep("followup");
+            setStep('followup');
           } catch {
-            setLlmError("Could not restore follow-up questions from this session.");
-            setStep("intake");
-            setIntakeSubstep("form");
+            setLlmError('Could not restore follow-up questions from this session.');
+            setStep('intake');
+            setIntakeSubstep('form');
             setFollowUpQuestions([]);
             setFollowUpAnswers({});
           }
-        } else if (data.resume_step === "results" && data.results_raw_text) {
+        } else if (data.resume_step === 'results' && data.results_raw_text) {
           try {
             const parsed = parseJsonObjectFromLlm(data.results_raw_text);
             const resPayload = validateSymptomResultsPayload(parsed);
@@ -382,13 +423,17 @@ const SymptomCheckPage: React.FC = () => {
               ...resPayload,
               ...(resumedSlug ? { intake_insurer_slug: resumedSlug } : {}),
             });
-            setStep("results");
+            setStep('results');
             if (data.price_estimate_raw_text) {
               try {
-                const priceParsed = parseJsonObjectFromLlm(data.price_estimate_raw_text);
+                const priceParsed = parseJsonObjectFromLlm(
+                  data.price_estimate_raw_text,
+                );
                 const pe = validatePriceEstimatePayload(priceParsed);
                 setPriceEstimate(pe);
-                setPriceEstimateCacheFingerprintState(priceEstimateCacheFingerprint(sid, resPayload));
+                setPriceEstimateCacheFingerprintState(
+                  priceEstimateCacheFingerprint(sid, resPayload),
+                );
               } catch {
                 setPriceEstimate(null);
                 setPriceEstimateCacheFingerprintState(null);
@@ -398,29 +443,29 @@ const SymptomCheckPage: React.FC = () => {
               setPriceEstimateCacheFingerprintState(null);
             }
           } catch {
-            setLlmError("Could not restore results from this session.");
-            setStep("intake");
-            setIntakeSubstep("form");
+            setLlmError('Could not restore results from this session.');
+            setStep('intake');
+            setIntakeSubstep('form');
           }
-        } else if (data.resume_step === "chat") {
+        } else if (data.resume_step === 'chat') {
           setFollowUpQuestions([]);
           setFollowUpAnswers({});
           setResults(null);
-          setStep("intake");
-          setIntakeSubstep("form");
+          setStep('intake');
+          setIntakeSubstep('form');
           setResumeChatNotice(true);
         } else {
           setFollowUpQuestions([]);
           setFollowUpAnswers({});
           setResults(null);
-          setStep("intake");
-          setIntakeSubstep("form");
+          setStep('intake');
+          setIntakeSubstep('form');
         }
 
         setSearchParams(
           (prev) => {
             const next = new URLSearchParams(prev);
-            next.delete("session");
+            next.delete('session');
             return next;
           },
           { replace: true },
@@ -430,10 +475,10 @@ const SymptomCheckPage: React.FC = () => {
           setLlmError(
             e instanceof Error
               ? e.message
-              : "Unable to load this session. Try again from the dashboard.",
+              : 'Unable to load this session. Try again from the dashboard.',
           );
-          setStep("intake");
-          setIntakeSubstep("form");
+          setStep('intake');
+          setIntakeSubstep('form');
         }
       } finally {
         if (!cancelled) setUrlSessionHydrating(false);
@@ -446,7 +491,7 @@ const SymptomCheckPage: React.FC = () => {
   }, [searchParams, setSearchParams]);
 
   const intakeValid =
-    symptoms.trim().length > 0 && insurance !== "" && addressValidation.valid;
+    symptoms.trim().length > 0 && insurance !== '' && addressValidation.valid;
 
   const followUpValid = followUpAnswersSatisfy(followUpQuestions, followUpAnswers);
 
@@ -455,7 +500,7 @@ const SymptomCheckPage: React.FC = () => {
     followUpAnswersSatisfy(secondFollowUpQuestions, secondFollowUpAnswers);
 
   const insurerLabel = useMemo(
-    () => (insurance ? insuranceLabel(insurance) : ""),
+    () => (insurance ? insuranceLabel(insurance) : ''),
     [insurance],
   );
 
@@ -483,9 +528,12 @@ const SymptomCheckPage: React.FC = () => {
   );
 
   /** First LLM call (intake → follow-up questions). Params allow resume without relying on async state. */
-  const runFollowUpRequest = async (input: { symptoms: string; insuranceLabel: string }) => {
+  const runFollowUpRequest = async (input: {
+    symptoms: string;
+    insuranceLabel: string;
+  }) => {
     setLlmError(null);
-    setPendingRequest("followup");
+    setPendingRequest('followup');
     try {
       const data = await followUpMutation.mutateAsync({
         symptoms: input.symptoms,
@@ -497,10 +545,12 @@ const SymptomCheckPage: React.FC = () => {
       setSecondFollowUpQuestions([]);
       setSecondFollowUpAnswers({});
       setResults(null);
-      setStep("followup");
+      setStep('followup');
       scrollAppToTop();
     } catch (err) {
-      setLlmError(err instanceof Error ? err.message : "Unable to load follow-up questions.");
+      setLlmError(
+        err instanceof Error ? err.message : 'Unable to load follow-up questions.',
+      );
     } finally {
       setPendingRequest(null);
     }
@@ -516,27 +566,27 @@ const SymptomCheckPage: React.FC = () => {
     answersRound2?: Record<string, FollowUpAnswer>;
     backendSessionId: string | null;
     /** Step-1 payer id for NPPES network hints (copied onto `results` so nearby fetch cannot miss it). */
-    intakeInsurerSlug: InsuranceId | "";
+    intakeInsurerSlug: InsuranceId | '';
   }) => {
     const q2 = input.questionsRound2 ?? [];
     const a2 = input.answersRound2 ?? {};
     if (!followUpAnswersSatisfy(input.questionsRound1, input.answersRound1)) {
-      setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      setLlmError('Saved answers are incomplete. Please review the questionnaire.');
       return;
     }
     if (q2.length > 0 && !followUpAnswersSatisfy(q2, a2)) {
-      setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      setLlmError('Saved answers are incomplete. Please review the questionnaire.');
       return;
     }
     if (!input.backendSessionId) {
       setLlmError(
-        "This session is missing server data. Please start a new symptom check from the beginning.",
+        'This session is missing server data. Please start a new symptom check from the beginning.',
       );
       return;
     }
     scrollAppToTop();
     setLlmError(null);
-    setPendingRequest("results");
+    setPendingRequest('results');
     try {
       const structured = [
         ...buildStructuredAnswers(input.questionsRound1, input.answersRound1),
@@ -551,12 +601,16 @@ const SymptomCheckPage: React.FC = () => {
       });
       setResults({
         ...payload,
-        ...(input.intakeInsurerSlug ? { intake_insurer_slug: input.intakeInsurerSlug } : {}),
+        ...(input.intakeInsurerSlug
+          ? { intake_insurer_slug: input.intakeInsurerSlug }
+          : {}),
       });
-      setStep("results");
-      void queryClient.invalidateQueries({ queryKey: ["symptom-sessions"] });
+      setStep('results');
+      void queryClient.invalidateQueries({ queryKey: ['symptom-sessions'] });
     } catch (err) {
-      setLlmError(err instanceof Error ? err.message : "Unable to load assessment results.");
+      setLlmError(
+        err instanceof Error ? err.message : 'Unable to load assessment results.',
+      );
     } finally {
       setPendingRequest(null);
     }
@@ -567,13 +621,13 @@ const SymptomCheckPage: React.FC = () => {
     if (!followUpValid || pendingRequest) return;
     if (!surveyBackendSessionId) {
       setLlmError(
-        "This session is missing server data. Please start a new symptom check from the beginning.",
+        'This session is missing server data. Please start a new symptom check from the beginning.',
       );
       return;
     }
     scrollAppToTop();
     setLlmError(null);
-    setPendingRequest("followup_round_2");
+    setPendingRequest('followup_round_2');
     try {
       const structured = buildStructuredAnswers(followUpQuestions, followUpAnswers);
       const data = await requestSecondFollowUpQuestions({
@@ -595,11 +649,13 @@ const SymptomCheckPage: React.FC = () => {
       } else {
         setSecondFollowUpQuestions(data.questions);
         setSecondFollowUpAnswers(buildInitialAnswers(data.questions));
-        setStep("followup_round_2");
+        setStep('followup_round_2');
         scrollAppToTop();
       }
     } catch (err) {
-      setLlmError(err instanceof Error ? err.message : "Unable to evaluate. Please try again.");
+      setLlmError(
+        err instanceof Error ? err.message : 'Unable to evaluate. Please try again.',
+      );
     } finally {
       setPendingRequest(null);
     }
@@ -637,7 +693,7 @@ const SymptomCheckPage: React.FC = () => {
 
   // Mirror flow state to localStorage whenever the user is past the resume gate.
   useEffect(() => {
-    if (sessionGate !== "ready") return;
+    if (sessionGate !== 'ready') return;
 
     const snapshot: SymptomCheckSessionSnapshot = {
       version: SYMPTOM_CHECK_SESSION_VERSION,
@@ -683,7 +739,7 @@ const SymptomCheckPage: React.FC = () => {
 
   /** After the LLM returns `care_taxonomy`, ask Django to rank NPPES facilities by road distance (via geocoding). */
   useEffect(() => {
-    if (step !== "results") {
+    if (step !== 'results') {
       setNearbyFacilities(null);
       setNearbyError(null);
       setNearbyTaxonomyUsed(null);
@@ -696,7 +752,7 @@ const SymptomCheckPage: React.FC = () => {
       setNearbyFacilities(null);
       setNearbyTaxonomyUsed(null);
       setNearbyError(
-        "Add a valid US address on step 1 to see nearby facilities. Go back to the first step, enter your address, then continue.",
+        'Add a valid US address on step 1 to see nearby facilities. Go back to the first step, enter your address, then continue.',
       );
       setNearbyLoading(false);
       return;
@@ -710,7 +766,7 @@ const SymptomCheckPage: React.FC = () => {
 
     const run = async () => {
       try {
-        const slugRaw = (results.intake_insurer_slug ?? "").trim() || insurance;
+        const slugRaw = (results.intake_insurer_slug ?? '').trim() || insurance;
         const payload = await requestNearbyFacilities({
           street: userAddress.street.trim(),
           city: userAddress.city.trim(),
@@ -726,7 +782,9 @@ const SymptomCheckPage: React.FC = () => {
       } catch (e) {
         if (cancelled) return;
         setNearbyFacilities(null);
-        setNearbyError(e instanceof Error ? e.message : "Unable to load nearby facilities.");
+        setNearbyError(
+          e instanceof Error ? e.message : 'Unable to load nearby facilities.',
+        );
       } finally {
         if (!cancelled) setNearbyLoading(false);
       }
@@ -749,7 +807,7 @@ const SymptomCheckPage: React.FC = () => {
 
   /** After NPPES finishes (or is skipped), one DeepSeek turn for cost copy tied to conditions + top facility. */
   useEffect(() => {
-    if (step !== "results") {
+    if (step !== 'results') {
       setPriceEstimate(null);
       setPriceEstimateCacheFingerprintState(null);
       setPriceEstimateLoading(false);
@@ -827,12 +885,14 @@ const SymptomCheckPage: React.FC = () => {
     setUserAddress({
       street: snap.address.street,
       city: snap.address.city,
-      state: (snap.address.state as UsStateCode | "") || "",
+      state: (snap.address.state as UsStateCode | '') || '',
       postalCode: snap.address.postalCode,
     });
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions(snap.followUpQuestions);
-    setFollowUpAnswers(snap.followUpAnswers);
+    setFollowUpAnswers(
+      migrateLegacyMultiChoiceAnswers(snap.followUpAnswers, snap.followUpQuestions),
+    );
     setSecondFollowUpQuestions(snap.secondFollowUpQuestions);
     setSecondFollowUpAnswers(snap.secondFollowUpAnswers);
     setResults(
@@ -848,32 +908,32 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimate(snap.priceEstimate ?? null);
     setPriceEstimateCacheFingerprintState(snap.priceEstimateCacheFingerprint ?? null);
     setPendingRequest(null);
-    setIntakeSubstep("form");
+    setIntakeSubstep('form');
   };
 
   /** Restore saved answers and optionally replay the in-flight LLM call from the saved phase. */
   const handleResumeSession = () => {
     const snap = readSymptomCheckSession();
     if (!snap) {
-      setSessionGate("ready");
+      setSessionGate('ready');
       return;
     }
     applySnapshotToState(snap);
-    setSessionGate("ready");
+    setSessionGate('ready');
 
     const ins = normalizeInsuranceId(snap.insurance);
-    const label = ins ? insuranceLabel(ins) : "";
+    const label = ins ? insuranceLabel(ins) : '';
     const trimmed = snap.symptoms.trim();
 
-    if (snap.pendingRequest === "followup") {
+    if (snap.pendingRequest === 'followup') {
       if (trimmed.length === 0 || !ins) return;
       void runFollowUpRequest({ symptoms: trimmed, insuranceLabel: label });
-    } else if (snap.pendingRequest === "followup_round_2") {
+    } else if (snap.pendingRequest === 'followup_round_2') {
       if (trimmed.length === 0 || !ins) return;
       if (snap.followUpQuestions.length === 0) return;
       if (!snap.surveyBackendSessionId) return;
       void handleCheckAndProceed();
-    } else if (snap.pendingRequest === "results") {
+    } else if (snap.pendingRequest === 'results') {
       if (trimmed.length === 0 || !ins) return;
       if (snap.followUpQuestions.length === 0) return;
       void runResultsRequest({
@@ -891,10 +951,10 @@ const SymptomCheckPage: React.FC = () => {
 
   const handleStartOverFromPrompt = () => {
     clearSymptomCheckSession();
-    setStep("intake");
-    setSymptoms("");
-    setInsurance("");
-    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setStep('intake');
+    setSymptoms('');
+    setInsurance('');
+    setUserAddress({ street: '', city: '', state: '', postalCode: '' });
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
@@ -908,18 +968,18 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimate(null);
     setPriceEstimateCacheFingerprintState(null);
     setPriceEstimateLoading(false);
-    setSessionGate("ready");
-    setIntakeSubstep("welcome");
+    setSessionGate('ready');
+    setIntakeSubstep('welcome');
   };
 
   const restart = () => {
     clearSymptomCheckSession();
     followUpMutation.reset();
     resultsMutation.reset();
-    setStep("intake");
-    setSymptoms("");
-    setInsurance("");
-    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setStep('intake');
+    setSymptoms('');
+    setInsurance('');
+    setUserAddress({ street: '', city: '', state: '', postalCode: '' });
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
@@ -934,7 +994,7 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimate(null);
     setPriceEstimateCacheFingerprintState(null);
     setPriceEstimateLoading(false);
-    setIntakeSubstep("welcome");
+    setIntakeSubstep('welcome');
   };
 
   useEffect(() => {
@@ -948,26 +1008,26 @@ const SymptomCheckPage: React.FC = () => {
   }, [results]);
 
   const stepIndex =
-    step === "intake" ? 1 : step === "followup" || step === "followup_round_2" ? 2 : 3;
+    step === 'intake' ? 1 : step === 'followup' || step === 'followup_round_2' ? 2 : 3;
 
   const updateAnswer = (questionId: string, value: FollowUpAnswer) => {
     setFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
-  /**
-   * LLM may emit a `none` option id (see mock in `symptomLlmClient`); selecting it clears
-   * other chips so “none of the above” stays mutually exclusive with other symptoms.
-   */
+  /** “None of the above” uses id `none_of_the_above` (prompt + validation); legacy `none` is still accepted. */
+  const isExclusiveNoneOptionId = (id: string) =>
+    id === MULTI_CHOICE_NONE_OF_ABOVE_ID || id === 'none';
+
   const toggleMultiChoice = (question: FollowUpQuestion, optionId: string) => {
     const current = followUpAnswers[question.id];
     const selected = Array.isArray(current) ? [...current] : [];
-    const isNone = optionId === "none";
+    const togglingNone = isExclusiveNoneOptionId(optionId);
 
     let next: string[];
-    if (isNone) {
-      next = selected.includes("none") ? [] : ["none"];
+    if (togglingNone) {
+      next = selected.includes(optionId) ? [] : [optionId];
     } else {
-      const withoutNone = selected.filter((id) => id !== "none");
+      const withoutNone = selected.filter((id) => !isExclusiveNoneOptionId(id));
       if (withoutNone.includes(optionId)) {
         next = withoutNone.filter((id) => id !== optionId);
       } else {
@@ -982,16 +1042,19 @@ const SymptomCheckPage: React.FC = () => {
     setSecondFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
-  const toggleSecondRoundMultiChoice = (question: FollowUpQuestion, optionId: string) => {
+  const toggleSecondRoundMultiChoice = (
+    question: FollowUpQuestion,
+    optionId: string,
+  ) => {
     const current = secondFollowUpAnswers[question.id];
     const selected = Array.isArray(current) ? [...current] : [];
-    const isNone = optionId === "none";
+    const togglingNone = isExclusiveNoneOptionId(optionId);
 
     let next: string[];
-    if (isNone) {
-      next = selected.includes("none") ? [] : ["none"];
+    if (togglingNone) {
+      next = selected.includes(optionId) ? [] : [optionId];
     } else {
-      const withoutNone = selected.filter((id) => id !== "none");
+      const withoutNone = selected.filter((id) => !isExclusiveNoneOptionId(id));
       if (withoutNone.includes(optionId)) {
         next = withoutNone.filter((id) => id !== optionId);
       } else {
@@ -1006,7 +1069,7 @@ const SymptomCheckPage: React.FC = () => {
   const renderFollowUpQuestion = (q: FollowUpQuestion) => {
     const value = followUpAnswers[q.id];
 
-    if (q.input_type === "single_choice" && q.options) {
+    if (q.input_type === 'single_choice' && q.options) {
       return (
         <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
@@ -1018,7 +1081,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </legend>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant font-body mb-3">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant font-body mb-3">
+              {q.helper_text}
+            </p>
           ) : null}
           <div className="flex flex-col gap-2">
             {q.options.map((opt) => {
@@ -1028,8 +1093,8 @@ const SymptomCheckPage: React.FC = () => {
                   key={opt.id}
                   className={`flex items-center gap-3 cursor-pointer rounded-lg border px-4 py-3 transition-colors ${
                     selected
-                      ? "border-secondary bg-secondary-fixed/10 ring-1 ring-secondary"
-                      : "border-outline-variant/25 bg-surface"
+                      ? 'border-secondary bg-secondary-fixed/10 ring-1 ring-secondary'
+                      : 'border-outline-variant/25 bg-surface'
                   }`}
                 >
                   <input
@@ -1049,7 +1114,7 @@ const SymptomCheckPage: React.FC = () => {
       );
     }
 
-    if (q.input_type === "multi_choice" && q.options) {
+    if (q.input_type === 'multi_choice' && q.options) {
       const selected = Array.isArray(value) ? value : [];
       return (
         <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
@@ -1062,7 +1127,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </legend>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant font-body mb-3">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant font-body mb-3">
+              {q.helper_text}
+            </p>
           ) : null}
           <div className="flex flex-col gap-2">
             {q.options.map((opt) => {
@@ -1072,8 +1139,8 @@ const SymptomCheckPage: React.FC = () => {
                   key={opt.id}
                   className={`flex items-center gap-3 cursor-pointer rounded-lg border px-4 py-3 transition-colors ${
                     checked
-                      ? "border-secondary bg-secondary-fixed/10 ring-1 ring-secondary"
-                      : "border-outline-variant/25 bg-surface"
+                      ? 'border-secondary bg-secondary-fixed/10 ring-1 ring-secondary'
+                      : 'border-outline-variant/25 bg-surface'
                   }`}
                 >
                   <input
@@ -1091,8 +1158,8 @@ const SymptomCheckPage: React.FC = () => {
       );
     }
 
-    if (q.input_type === "text") {
-      const textVal = typeof value === "string" ? value : "";
+    if (q.input_type === 'text') {
+      const textVal = typeof value === 'string' ? value : '';
       return (
         <div key={q.id}>
           <label
@@ -1107,7 +1174,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </label>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant font-body mb-2">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant font-body mb-2">
+              {q.helper_text}
+            </p>
           ) : null}
           <textarea
             className="w-full min-h-[120px] bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body leading-relaxed focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner resize-y"
@@ -1119,10 +1188,10 @@ const SymptomCheckPage: React.FC = () => {
       );
     }
 
-    if (q.input_type === "scale_1_10") {
+    if (q.input_type === 'scale_1_10') {
       const min = q.scale_min ?? 1;
       const max = q.scale_max ?? 10;
-      const numeric = typeof value === "number" && Number.isFinite(value) ? value : min;
+      const numeric = typeof value === 'number' && Number.isFinite(value) ? value : min;
       const ticks = Array.from({ length: max - min + 1 }, (_, i) => min + i);
       return (
         <div key={q.id}>
@@ -1135,7 +1204,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </p>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant mb-4 font-body">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant mb-4 font-body">
+              {q.helper_text}
+            </p>
           ) : null}
           <div className="bg-surface px-5 py-6 rounded-xl border border-outline-variant/10">
             <div className="flex justify-between text-xs font-semibold text-primary mb-3 px-1 gap-1 overflow-x-auto">
@@ -1157,9 +1228,11 @@ const SymptomCheckPage: React.FC = () => {
               onChange={(e) => updateAnswer(q.id, Number(e.target.value))}
             />
             <div className="flex justify-between text-xs text-on-surface-variant mt-3 px-1 font-medium">
-              <span>{q.scale_min_label ?? "Low"}</span>
+              <span>{q.scale_min_label ?? 'Low'}</span>
               <span className="text-on-surface font-semibold">{numeric}</span>
-              <span className="text-error font-bold">{q.scale_max_label ?? "High"}</span>
+              <span className="text-error font-bold">
+                {q.scale_max_label ?? 'High'}
+              </span>
             </div>
           </div>
         </div>
@@ -1173,7 +1246,7 @@ const SymptomCheckPage: React.FC = () => {
   const renderSecondRoundQuestion = (q: FollowUpQuestion) => {
     const value = secondFollowUpAnswers[q.id];
 
-    if (q.input_type === "single_choice" && q.options) {
+    if (q.input_type === 'single_choice' && q.options) {
       return (
         <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
@@ -1185,7 +1258,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </legend>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant font-body mb-3">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant font-body mb-3">
+              {q.helper_text}
+            </p>
           ) : null}
           <div className="flex flex-col gap-2">
             {q.options.map((opt) => {
@@ -1195,8 +1270,8 @@ const SymptomCheckPage: React.FC = () => {
                   key={opt.id}
                   className={`flex items-center gap-3 cursor-pointer rounded-lg border px-4 py-3 transition-colors ${
                     selected
-                      ? "border-secondary bg-secondary-fixed/10 ring-1 ring-secondary"
-                      : "border-outline-variant/25 bg-surface"
+                      ? 'border-secondary bg-secondary-fixed/10 ring-1 ring-secondary'
+                      : 'border-outline-variant/25 bg-surface'
                   }`}
                 >
                   <input
@@ -1216,7 +1291,7 @@ const SymptomCheckPage: React.FC = () => {
       );
     }
 
-    if (q.input_type === "multi_choice" && q.options) {
+    if (q.input_type === 'multi_choice' && q.options) {
       const selected = Array.isArray(value) ? value : [];
       return (
         <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
@@ -1229,7 +1304,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </legend>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant font-body mb-3">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant font-body mb-3">
+              {q.helper_text}
+            </p>
           ) : null}
           <div className="flex flex-col gap-2">
             {q.options.map((opt) => {
@@ -1239,8 +1316,8 @@ const SymptomCheckPage: React.FC = () => {
                   key={opt.id}
                   className={`flex items-center gap-3 cursor-pointer rounded-lg border px-4 py-3 transition-colors ${
                     checked
-                      ? "border-secondary bg-secondary-fixed/10 ring-1 ring-secondary"
-                      : "border-outline-variant/25 bg-surface"
+                      ? 'border-secondary bg-secondary-fixed/10 ring-1 ring-secondary'
+                      : 'border-outline-variant/25 bg-surface'
                   }`}
                 >
                   <input
@@ -1258,8 +1335,8 @@ const SymptomCheckPage: React.FC = () => {
       );
     }
 
-    if (q.input_type === "text") {
-      const textVal = typeof value === "string" ? value : "";
+    if (q.input_type === 'text') {
+      const textVal = typeof value === 'string' ? value : '';
       return (
         <div key={q.id}>
           <label
@@ -1274,7 +1351,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </label>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant font-body mb-2">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant font-body mb-2">
+              {q.helper_text}
+            </p>
           ) : null}
           <textarea
             className="w-full min-h-[120px] bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body leading-relaxed focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner resize-y"
@@ -1286,10 +1365,10 @@ const SymptomCheckPage: React.FC = () => {
       );
     }
 
-    if (q.input_type === "scale_1_10") {
+    if (q.input_type === 'scale_1_10') {
       const min = q.scale_min ?? 1;
       const max = q.scale_max ?? 10;
-      const numeric = typeof value === "number" && Number.isFinite(value) ? value : min;
+      const numeric = typeof value === 'number' && Number.isFinite(value) ? value : min;
       const ticks = Array.from({ length: max - min + 1 }, (_, i) => min + i);
       return (
         <div key={q.id}>
@@ -1302,7 +1381,9 @@ const SymptomCheckPage: React.FC = () => {
             ) : null}
           </p>
           {q.helper_text ? (
-            <p className="text-xs text-on-surface-variant mb-4 font-body">{q.helper_text}</p>
+            <p className="text-xs text-on-surface-variant mb-4 font-body">
+              {q.helper_text}
+            </p>
           ) : null}
           <div className="bg-surface px-5 py-6 rounded-xl border border-outline-variant/10">
             <div className="flex justify-between text-xs font-semibold text-primary mb-3 px-1 gap-1 overflow-x-auto">
@@ -1324,9 +1405,11 @@ const SymptomCheckPage: React.FC = () => {
               onChange={(e) => updateSecondRoundAnswer(q.id, Number(e.target.value))}
             />
             <div className="flex justify-between text-xs text-on-surface-variant mt-3 px-1 font-medium">
-              <span>{q.scale_min_label ?? "Low"}</span>
+              <span>{q.scale_min_label ?? 'Low'}</span>
               <span className="text-on-surface font-semibold">{numeric}</span>
-              <span className="text-error font-bold">{q.scale_max_label ?? "High"}</span>
+              <span className="text-error font-bold">
+                {q.scale_max_label ?? 'High'}
+              </span>
             </div>
           </div>
         </div>
@@ -1336,7 +1419,7 @@ const SymptomCheckPage: React.FC = () => {
     return null;
   };
 
-  const followupRound1Busy = pendingRequest === "followup_round_2" || resultsLoading;
+  const followupRound1Busy = pendingRequest === 'followup_round_2' || resultsLoading;
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12 pb-16">
@@ -1354,7 +1437,7 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         ) : null}
 
-        {sessionGate === "need-choice" ? (
+        {sessionGate === 'need-choice' ? (
           <div
             aria-labelledby="symptom-session-resume-title"
             aria-modal="true"
@@ -1369,9 +1452,9 @@ const SymptomCheckPage: React.FC = () => {
                 Resume your symptom check?
               </h2>
               <p className="text-sm text-on-surface-variant font-body leading-relaxed mb-6">
-                We saved your progress in this browser. You can continue where you left off, or start
-                over. If a question step was loading when you left, we will request it again when you
-                resume.
+                We saved your progress in this browser. You can continue where you left
+                off, or start over. If a question step was loading when you left, we
+                will request it again when you resume.
               </p>
               <div className="flex flex-col sm:flex-row gap-3">
                 <button
@@ -1404,17 +1487,19 @@ const SymptomCheckPage: React.FC = () => {
               Symptom Check
             </h1>
             <p className="text-on-surface-variant font-body text-base max-w-2xl">
-              {step === "intake" && intakeSubstep === "welcome" ? (
+              {step === 'intake' && intakeSubstep === 'welcome' ? (
                 <>
-                  Review what this guided check covers, then continue to the questionnaire when you
-                  are ready. After you begin filling it out, progress can be saved in this browser so you
-                  can resume if you leave mid-check.
+                  Review what this guided check covers, then continue to the
+                  questionnaire when you are ready. After you begin filling it out,
+                  progress can be saved in this browser so you can resume if you leave
+                  mid-check.
                 </>
               ) : (
                 <>
-                  Answer a short questionnaire about what you are experiencing. We use your responses
-                  to highlight possible next steps, nearby facilities, and illustrative price ranges tied
-                  to the insurer you select—not a personal quote.
+                  Answer a short questionnaire about what you are experiencing. We use
+                  your responses to highlight possible next steps, nearby facilities,
+                  and illustrative price ranges tied to the insurer you select—not a
+                  personal quote.
                 </>
               )}
             </p>
@@ -1423,21 +1508,26 @@ const SymptomCheckPage: React.FC = () => {
             className="flex items-center gap-2 text-sm font-body text-on-surface-variant bg-surface-container-lowest px-4 py-2 rounded-full border-ghost shadow-ambient shrink-0"
             aria-label="Assessment progress"
           >
-            <span className="material-symbols-outlined text-secondary text-lg">data_loss_prevention</span>
+            <span className="material-symbols-outlined text-secondary text-lg">
+              data_loss_prevention
+            </span>
             Step {stepIndex} of 3
           </div>
         </header>
 
-        {resumeChatNotice && step === "intake" && intakeSubstep === "form" ? (
+        {resumeChatNotice && step === 'intake' && intakeSubstep === 'form' ? (
           <div
             className="mb-8 rounded-xl border border-primary/30 bg-primary-fixed/10 px-4 py-4 md:px-6 md:py-5 flex flex-col sm:flex-row sm:items-center gap-4"
             role="status"
           >
             <div className="flex-1 min-w-0">
-              <p className="font-headline text-sm font-bold text-primary mb-1">Conversational session</p>
+              <p className="font-headline text-sm font-bold text-primary mb-1">
+                Conversational session
+              </p>
               <p className="font-body text-sm text-on-surface-variant">
-                This entry was created with the live chat interview, not the structured Symptom Check
-                questionnaire. You can start a new guided check below whenever you are ready.
+                This entry was created with the live chat interview, not the structured
+                Symptom Check questionnaire. You can start a new guided check below
+                whenever you are ready.
               </p>
             </div>
             <button
@@ -1450,18 +1540,20 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         ) : null}
 
-        {step === "intake" && intakeSubstep === "welcome" ? (
+        {step === 'intake' && intakeSubstep === 'welcome' ? (
           <section className="relative overflow-hidden rounded-xl border-ghost bg-surface-container-lowest p-6 shadow-ambient md:p-8">
             <div className="pointer-events-none absolute -right-16 -top-16 h-48 w-48 rounded-full bg-secondary/10 blur-2xl" />
             <div className="relative z-10">
               <h2 className="mb-3 flex items-center gap-2 font-headline text-xl font-bold text-primary">
-                <span className="material-symbols-outlined text-secondary">waving_hand</span>
+                <span className="material-symbols-outlined text-secondary">
+                  waving_hand
+                </span>
                 Welcome to Symptom Check
               </h2>
               <p className="mb-6 max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant md:text-base">
-                This is a structured, three-part guided assessment—not a diagnosis and not emergency
-                triage. It helps you organize what you are experiencing so you can discuss it with a
-                clinician or care team.
+                This is a structured, three-part guided assessment—not a diagnosis and
+                not emergency triage. It helps you organize what you are experiencing so
+                you can discuss it with a clinician or care team.
               </p>
               <ul className="mb-8 space-y-4 font-body text-sm text-on-surface md:text-base">
                 <li className="flex gap-3">
@@ -1472,10 +1564,13 @@ const SymptomCheckPage: React.FC = () => {
                     1
                   </span>
                   <div>
-                    <p className="font-headline font-semibold text-on-surface">Tell us the basics</p>
+                    <p className="font-headline font-semibold text-on-surface">
+                      Tell us the basics
+                    </p>
                     <p className="mt-1 leading-relaxed text-on-surface-variant">
-                      Describe your symptoms, choose an insurer for illustrative cost context, and enter
-                      a US address so we can rank nearby facilities from the public NPI directory.
+                      Describe your symptoms, choose an insurer for illustrative cost
+                      context, and enter a US address so we can rank nearby facilities
+                      from the public NPI directory.
                     </p>
                   </div>
                 </li>
@@ -1487,10 +1582,13 @@ const SymptomCheckPage: React.FC = () => {
                     2
                   </span>
                   <div>
-                    <p className="font-headline font-semibold text-on-surface">Answer tailored questions</p>
+                    <p className="font-headline font-semibold text-on-surface">
+                      Answer tailored questions
+                    </p>
                     <p className="mt-1 leading-relaxed text-on-surface-variant">
-                      We generate follow-up questions from your description (similar to what a clinician
-                      might ask next). You may see one or two short rounds before results.
+                      We generate follow-up questions from your description (similar to
+                      what a clinician might ask next). You may see one or two short
+                      rounds before results.
                     </p>
                   </div>
                 </li>
@@ -1502,10 +1600,13 @@ const SymptomCheckPage: React.FC = () => {
                     3
                   </span>
                   <div>
-                    <p className="font-headline font-semibold text-on-surface">Review illustrative results</p>
+                    <p className="font-headline font-semibold text-on-surface">
+                      Review illustrative results
+                    </p>
                     <p className="mt-1 leading-relaxed text-on-surface-variant">
-                      You will see possible conditions for discussion only, nearby hospital-style listings,
-                      and general price context—not a personal quote or medical decision.
+                      You will see possible conditions for discussion only, nearby
+                      hospital-style listings, and general price context—not a personal
+                      quote or medical decision.
                     </p>
                   </div>
                 </li>
@@ -1515,27 +1616,31 @@ const SymptomCheckPage: React.FC = () => {
                   className="cursor-pointer gradient-primary flex items-center justify-center gap-2 rounded-lg px-8 py-3 font-headline text-sm font-semibold text-on-primary shadow-ambient transition-all hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)]"
                   type="button"
                   onClick={() => {
-                    setIntakeSubstep("form");
+                    setIntakeSubstep('form');
                     scrollAppToTop();
                   }}
                 >
                   Continue to questionnaire
-                  <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                  <span className="material-symbols-outlined text-lg">
+                    arrow_forward
+                  </span>
                 </button>
               </div>
             </div>
           </section>
         ) : null}
 
-        {step === "intake" && intakeSubstep === "form" ? (
+        {step === 'intake' && intakeSubstep === 'form' ? (
           <section
             className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden transition-opacity duration-300 ease-out ${
-              followUpLoading ? "opacity-60 pointer-events-none" : "opacity-100"
+              followUpLoading ? 'opacity-60 pointer-events-none' : 'opacity-100'
             }`}
           >
             <div className="absolute -top-12 -right-12 w-40 h-40 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
             <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
-              <span className="material-symbols-outlined text-secondary">edit_note</span>
+              <span className="material-symbols-outlined text-secondary">
+                edit_note
+              </span>
               Your symptoms &amp; coverage
             </h2>
             <div className="space-y-8 relative z-10">
@@ -1557,8 +1662,8 @@ const SymptomCheckPage: React.FC = () => {
                   onChange={(e) => setSymptoms(e.target.value)}
                 />
                 <p className="mt-2 text-xs text-on-surface-variant font-body">
-                  Include timing, severity, anything that makes it better or worse, and relevant
-                  history if you are comfortable sharing it.
+                  Include timing, severity, anything that makes it better or worse, and
+                  relevant history if you are comfortable sharing it.
                 </p>
               </div>
 
@@ -1577,8 +1682,8 @@ const SymptomCheckPage: React.FC = () => {
                         key={opt.id}
                         className={`flex items-center gap-3 cursor-pointer rounded-xl border px-4 py-3 transition-colors ${
                           selected
-                            ? "border-primary bg-primary-fixed/15 ring-1 ring-primary"
-                            : "border-outline-variant/30 bg-surface hover:border-outline-variant/60"
+                            ? 'border-primary bg-primary-fixed/15 ring-1 ring-primary'
+                            : 'border-outline-variant/30 bg-surface hover:border-outline-variant/60'
                         }`}
                       >
                         <input
@@ -1610,7 +1715,8 @@ const SymptomCheckPage: React.FC = () => {
                     </span>
                   </legend>
                   <p className="text-xs text-on-surface-variant font-body mb-4">
-                    Used to rank nearby facilities for your situation. US addresses only (NPPES directory).
+                    Used to rank nearby facilities for your situation. US addresses only
+                    (NPPES directory).
                   </p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="md:col-span-2">
@@ -1625,7 +1731,8 @@ const SymptomCheckPage: React.FC = () => {
                       </label>
                       <input
                         aria-invalid={
-                          addressFieldBlurred.street && Boolean(addressValidation.errors.street)
+                          addressFieldBlurred.street &&
+                          Boolean(addressValidation.errors.street)
                         }
                         autoComplete="street-address"
                         className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
@@ -1637,7 +1744,10 @@ const SymptomCheckPage: React.FC = () => {
                           setAddressFieldBlurred((prev) => ({ ...prev, street: true }))
                         }
                         onChange={(e) =>
-                          setUserAddress((prev) => ({ ...prev, street: e.target.value }))
+                          setUserAddress((prev) => ({
+                            ...prev,
+                            street: e.target.value,
+                          }))
                         }
                       />
                       {addressFieldBlurred.street && addressValidation.errors.street ? (
@@ -1659,7 +1769,8 @@ const SymptomCheckPage: React.FC = () => {
                       </label>
                       <input
                         aria-invalid={
-                          addressFieldBlurred.city && Boolean(addressValidation.errors.city)
+                          addressFieldBlurred.city &&
+                          Boolean(addressValidation.errors.city)
                         }
                         autoComplete="address-level2"
                         className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner"
@@ -1693,7 +1804,8 @@ const SymptomCheckPage: React.FC = () => {
                       </label>
                       <select
                         aria-invalid={
-                          addressFieldBlurred.state && Boolean(addressValidation.errors.state)
+                          addressFieldBlurred.state &&
+                          Boolean(addressValidation.errors.state)
                         }
                         className="w-full bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary shadow-inner"
                         id="addr-state"
@@ -1704,7 +1816,7 @@ const SymptomCheckPage: React.FC = () => {
                         onChange={(e) =>
                           setUserAddress((prev) => ({
                             ...prev,
-                            state: e.target.value as UsStateCode | "",
+                            state: e.target.value as UsStateCode | '',
                           }))
                         }
                       >
@@ -1746,14 +1858,18 @@ const SymptomCheckPage: React.FC = () => {
                         type="text"
                         value={userAddress.postalCode}
                         onBlur={() =>
-                          setAddressFieldBlurred((prev) => ({ ...prev, postalCode: true }))
+                          setAddressFieldBlurred((prev) => ({
+                            ...prev,
+                            postalCode: true,
+                          }))
                         }
                         onChange={(e) => {
-                          const v = e.target.value.replace(/\D/g, "").slice(0, 5);
+                          const v = e.target.value.replace(/\D/g, '').slice(0, 5);
                           setUserAddress((prev) => ({ ...prev, postalCode: v }));
                         }}
                       />
-                      {addressFieldBlurred.postalCode && addressValidation.errors.postalCode ? (
+                      {addressFieldBlurred.postalCode &&
+                      addressValidation.errors.postalCode ? (
                         <p className="mt-1 text-xs text-error font-body" role="alert">
                           {addressValidation.errors.postalCode}
                         </p>
@@ -1792,12 +1908,15 @@ const SymptomCheckPage: React.FC = () => {
                   type="button"
                   onClick={() => void handleContinueToFollowUp()}
                 >
-                  {followUpLoading ? "Preparing questions…" : "Continue"}
-                  <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                  {followUpLoading ? 'Preparing questions…' : 'Continue'}
+                  <span className="material-symbols-outlined text-lg">
+                    arrow_forward
+                  </span>
                 </button>
                 {!intakeValid && (
                   <p className="text-xs text-on-surface-variant font-body">
-                    Add symptoms, choose an insurer, and complete your address to continue.
+                    Add symptoms, choose an insurer, and complete your address to
+                    continue.
                   </p>
                 )}
               </div>
@@ -1805,20 +1924,24 @@ const SymptomCheckPage: React.FC = () => {
           </section>
         ) : null}
 
-        {step === "followup" && (
+        {step === 'followup' && (
           <div className="space-y-6">
             <div
               className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
-                followupRound1Busy ? "opacity-40" : "opacity-100"
+                followupRound1Busy ? 'opacity-40' : 'opacity-100'
               }`}
             >
-              <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
+              <span className="material-symbols-outlined text-primary mt-0.5">
+                auto_awesome
+              </span>
               <div>
-                <h3 className="text-sm font-bold text-primary mb-1 font-headline">Follow-up questions</h3>
+                <h3 className="text-sm font-bold text-primary mb-1 font-headline">
+                  Follow-up questions
+                </h3>
                 <p className="text-sm text-on-surface-variant font-body leading-relaxed">
-                  These questions were generated from your symptom description to mirror what a
-                  clinician might ask next. After you answer, we will check whether a bit more detail
-                  helps before showing possible conditions.
+                  These questions were generated from your symptom description to mirror
+                  what a clinician might ask next. After you answer, we will check
+                  whether a bit more detail helps before showing possible conditions.
                 </p>
               </div>
             </div>
@@ -1826,7 +1949,7 @@ const SymptomCheckPage: React.FC = () => {
             <div className="relative">
               <section
                 className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
-                  followupRound1Busy ? "opacity-35 pointer-events-none" : "opacity-100"
+                  followupRound1Busy ? 'opacity-35 pointer-events-none' : 'opacity-100'
                 }`}
               >
                 <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
@@ -1835,7 +1958,9 @@ const SymptomCheckPage: React.FC = () => {
                 </h2>
 
                 <div className="space-y-10">
-                  {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
+                  {followUpQuestions.map((question) =>
+                    renderFollowUpQuestion(question),
+                  )}
                 </div>
 
                 {llmError ? (
@@ -1850,8 +1975,8 @@ const SymptomCheckPage: React.FC = () => {
                     disabled={followupRound1Busy}
                     type="button"
                     onClick={() => {
-                      setStep("intake");
-                      setIntakeSubstep("form");
+                      setStep('intake');
+                      setIntakeSubstep('form');
                       setFollowUpQuestions([]);
                       setFollowUpAnswers({});
                       setSecondFollowUpQuestions([]);
@@ -1867,12 +1992,14 @@ const SymptomCheckPage: React.FC = () => {
                     type="button"
                     onClick={() => void handleCheckAndProceed()}
                   >
-                    {pendingRequest === "followup_round_2"
-                      ? "Evaluating…"
+                    {pendingRequest === 'followup_round_2'
+                      ? 'Evaluating…'
                       : resultsLoading
-                        ? "Analyzing responses…"
-                        : "Continue"}
-                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                        ? 'Analyzing responses…'
+                        : 'Continue'}
+                    <span className="material-symbols-outlined text-lg">
+                      monitoring
+                    </span>
                   </button>
                 </div>
               </section>
@@ -1884,19 +2011,21 @@ const SymptomCheckPage: React.FC = () => {
                 >
                   <div className="w-full max-w-3xl space-y-3">
                     <p className="text-sm font-semibold text-primary font-headline">
-                      {pendingRequest === "followup_round_2"
-                        ? "Evaluating your answers…"
-                        : "Analyzing your responses…"}
+                      {pendingRequest === 'followup_round_2'
+                        ? 'Evaluating your answers…'
+                        : 'Analyzing your responses…'}
                     </p>
                     <LinearLoadingBar
                       estimatedSeconds={30}
                       label={
-                        pendingRequest === "followup_round_2"
-                          ? "Evaluating your answers"
-                          : "Analyzing your responses"
+                        pendingRequest === 'followup_round_2'
+                          ? 'Evaluating your answers'
+                          : 'Analyzing your responses'
                       }
                       progress={
-                        pendingRequest === "followup_round_2" ? roundTwoRequestProgress : resultsProgress
+                        pendingRequest === 'followup_round_2'
+                          ? roundTwoRequestProgress
+                          : resultsProgress
                       }
                     />
                   </div>
@@ -1906,21 +2035,23 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         )}
 
-        {step === "followup_round_2" && (
+        {step === 'followup_round_2' && (
           <div className="space-y-6">
             <div
               className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
-                resultsLoading ? "opacity-40" : "opacity-100"
+                resultsLoading ? 'opacity-40' : 'opacity-100'
               }`}
             >
-              <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
+              <span className="material-symbols-outlined text-primary mt-0.5">
+                auto_awesome
+              </span>
               <div>
                 <h3 className="text-sm font-bold text-primary mb-1 font-headline">
                   Additional clarifying questions
                 </h3>
                 <p className="text-sm text-on-surface-variant font-body leading-relaxed">
-                  Based on your answers, we need a bit more detail to narrow the illustrative
-                  assessment. Please answer the questions below.
+                  Based on your answers, we need a bit more detail to narrow the
+                  illustrative assessment. Please answer the questions below.
                 </p>
               </div>
             </div>
@@ -1928,7 +2059,7 @@ const SymptomCheckPage: React.FC = () => {
             <div className="relative">
               <section
                 className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
-                  resultsLoading ? "opacity-35 pointer-events-none" : "opacity-100"
+                  resultsLoading ? 'opacity-35 pointer-events-none' : 'opacity-100'
                 }`}
               >
                 <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
@@ -1937,7 +2068,9 @@ const SymptomCheckPage: React.FC = () => {
                 </h2>
 
                 <div className="space-y-10">
-                  {secondFollowUpQuestions.map((question) => renderSecondRoundQuestion(question))}
+                  {secondFollowUpQuestions.map((question) =>
+                    renderSecondRoundQuestion(question),
+                  )}
                 </div>
 
                 {llmError ? (
@@ -1952,7 +2085,7 @@ const SymptomCheckPage: React.FC = () => {
                     disabled={resultsLoading}
                     type="button"
                     onClick={() => {
-                      setStep("followup");
+                      setStep('followup');
                       setSecondFollowUpQuestions([]);
                       setSecondFollowUpAnswers({});
                       setLlmError(null);
@@ -1966,8 +2099,10 @@ const SymptomCheckPage: React.FC = () => {
                     type="button"
                     onClick={() => void handleSeeResults()}
                   >
-                    {resultsLoading ? "Analyzing responses…" : "See results"}
-                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                    {resultsLoading ? 'Analyzing responses…' : 'See results'}
+                    <span className="material-symbols-outlined text-lg">
+                      monitoring
+                    </span>
                   </button>
                 </div>
               </section>
@@ -1993,10 +2128,10 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         )}
 
-        {step === "results" && results && (
+        {step === 'results' && results && (
           <div
             className={`space-y-8 transition-opacity duration-500 ease-out ${
-              resultsEntered ? "opacity-100" : "opacity-0"
+              resultsEntered ? 'opacity-100' : 'opacity-0'
             }`}
           >
             <div className="bg-error-container/40 border border-error-container/50 rounded-xl p-5 flex gap-3 items-start">
@@ -2011,10 +2146,11 @@ const SymptomCheckPage: React.FC = () => {
                   Not a diagnosis or emergency instruction
                 </h3>
                 <p className="text-xs sm:text-sm text-on-surface-variant font-body leading-relaxed">
-                  The list below illustrates conditions sometimes considered when symptoms like
-                  yours are reported. Only a licensed clinician who examines you can diagnose or
-                  advise urgency. If you believe you are having an emergency, call 911 or go to the
-                  nearest emergency department.
+                  The list below illustrates conditions sometimes considered when
+                  symptoms like yours are reported. Only a licensed clinician who
+                  examines you can diagnose or advise urgency. If you believe you are
+                  having an emergency, call 911 or go to the nearest emergency
+                  department.
                 </p>
               </div>
             </div>
@@ -2035,7 +2171,9 @@ const SymptomCheckPage: React.FC = () => {
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
               <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">neurology</span>
+                <span className="material-symbols-outlined text-secondary">
+                  neurology
+                </span>
                 Possible conditions (illustrative)
               </h2>
               <ul className="space-y-5">
@@ -2045,7 +2183,9 @@ const SymptomCheckPage: React.FC = () => {
                     className="border-b border-outline-variant/10 last:border-0 pb-5 last:pb-0"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
-                      <h3 className="font-headline text-base font-bold text-on-surface">{d.title}</h3>
+                      <h3 className="font-headline text-base font-bold text-on-surface">
+                        {d.title}
+                      </h3>
                       <span
                         className={`text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full border shrink-0 ${severityStyles(d.condition_severity)}`}
                       >
@@ -2056,7 +2196,9 @@ const SymptomCheckPage: React.FC = () => {
                       {d.explanation}
                     </p>
                     <p className="text-sm text-on-surface font-body leading-relaxed mt-3">
-                      <span className="font-semibold text-primary">Why this is on the list: </span>
+                      <span className="font-semibold text-primary">
+                        Why this is on the list:{' '}
+                      </span>
                       {d.why_possible}
                     </p>
                   </li>
@@ -2066,41 +2208,51 @@ const SymptomCheckPage: React.FC = () => {
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
               <h2 className="text-xl font-headline font-bold text-primary mb-2 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">local_hospital</span>
+                <span className="material-symbols-outlined text-secondary">
+                  local_hospital
+                </span>
                 Nearby hospitals
               </h2>
               <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed">
-                Order is <strong className="text-on-surface">relevance-aware</strong>: we combine
-                straight-line distance with a heuristic score from the public NPI directory (name
-                keywords, facility type, and multi-site signals). Patient reviews are{" "}
-                <strong className="text-on-surface">not</strong> in that registry—so farther
-                listings can rank higher when they look like established care sites.
+                Order is <strong className="text-on-surface">relevance-aware</strong>:
+                we combine straight-line distance with a heuristic score from the public
+                NPI directory (name keywords, facility type, and multi-site signals).
+                Patient reviews are <strong className="text-on-surface">not</strong> in
+                that registry—so farther listings can rank higher when they look like
+                established care sites.
               </p>
               <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed">
-                In-network labels use publicly posted payer transparency files when we have them for
-                your selection—they are <strong className="text-on-surface">not</strong> eligibility
-                checks. We still list nearby options either way; likely in-network rows are shown
+                In-network labels use publicly posted payer transparency files when we
+                have them for your selection—they are{' '}
+                <strong className="text-on-surface">not</strong> eligibility checks. We
+                still list nearby options either way; likely in-network rows are shown
                 first when a directory match is available.
               </p>
-              {insurance === "fidelis" ? (
+              {insurance === 'fidelis' ? (
                 <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed rounded-lg border border-outline-variant/20 bg-surface-container-low/40 px-3 py-2">
-                  <strong className="text-on-surface">Fidelis:</strong> posted in-network files list
-                  individual clinician NPIs, while this step shows <strong className="text-on-surface">
+                  <strong className="text-on-surface">Fidelis:</strong> posted
+                  in-network files list individual clinician NPIs, while this step shows{' '}
+                  <strong className="text-on-surface">
                     hospital-style organization NPIs
-                  </strong>{" "}
-                  from the public directory—so we do not mark in- or out-of-network for that pairing.
+                  </strong>{' '}
+                  from the public directory—so we do not mark in- or out-of-network for
+                  that pairing.
                 </p>
               ) : null}
               {nearbyTaxonomyUsed ? (
                 <p className="text-xs text-on-surface-variant font-body mb-4">
-                  Directory search used NUCC taxonomy code{" "}
-                  <span className="font-mono text-on-surface">{nearbyTaxonomyUsed}</span> from your
-                  assessment.
+                  Directory search used NUCC taxonomy code{' '}
+                  <span className="font-mono text-on-surface">
+                    {nearbyTaxonomyUsed}
+                  </span>{' '}
+                  from your assessment.
                 </p>
               ) : null}
 
               {nearbyLoading ? (
-                <p className="text-sm text-on-surface-variant font-body">Loading nearby facilities…</p>
+                <p className="text-sm text-on-surface-variant font-body">
+                  Loading nearby facilities…
+                </p>
               ) : null}
 
               {nearbyError ? (
@@ -2109,13 +2261,19 @@ const SymptomCheckPage: React.FC = () => {
                 </p>
               ) : null}
 
-              {!nearbyLoading && !nearbyError && nearbyFacilities && nearbyFacilities.length === 0 ? (
+              {!nearbyLoading &&
+              !nearbyError &&
+              nearbyFacilities &&
+              nearbyFacilities.length === 0 ? (
                 <p className="text-sm text-on-surface-variant font-body">
-                  No facilities matched this search. Try adjusting your ZIP or try again later.
+                  No facilities matched this search. Try adjusting your ZIP or try again
+                  later.
                 </p>
               ) : null}
 
-              {!nearbyLoading && !nearbyError && displayedNearbyFacilities.length > 0 ? (
+              {!nearbyLoading &&
+              !nearbyError &&
+              displayedNearbyFacilities.length > 0 ? (
                 <div className="space-y-4">
                   <ul className="space-y-4">
                     {displayedNearbyFacilities.slice(0, 3).map((h) => {
@@ -2127,7 +2285,9 @@ const SymptomCheckPage: React.FC = () => {
                         >
                           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                             <div>
-                              <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                              <p className="font-headline font-bold text-on-surface">
+                                {h.name}
+                              </p>
                               <p className="text-sm text-on-surface-variant font-body mt-1">
                                 {h.address_line}
                               </p>
@@ -2140,7 +2300,9 @@ const SymptomCheckPage: React.FC = () => {
                             </div>
                             <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
                               <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
-                                <span className="material-symbols-outlined text-base">near_me</span>
+                                <span className="material-symbols-outlined text-base">
+                                  near_me
+                                </span>
                                 {h.distance_label}
                               </span>
                               <a
@@ -2149,7 +2311,9 @@ const SymptomCheckPage: React.FC = () => {
                                 rel="noreferrer"
                                 target="_blank"
                               >
-                                <span className="material-symbols-outlined text-base">map</span>
+                                <span className="material-symbols-outlined text-base">
+                                  map
+                                </span>
                                 Maps
                               </a>
                             </div>
@@ -2162,7 +2326,8 @@ const SymptomCheckPage: React.FC = () => {
                   {displayedNearbyFacilities.length > 3 ? (
                     <details className="rounded-xl border border-outline-variant/15 bg-surface px-4 py-3">
                       <summary className="cursor-pointer text-sm font-semibold text-primary font-headline">
-                        Show more facilities ({displayedNearbyFacilities.length - 3} more)
+                        Show more facilities ({displayedNearbyFacilities.length - 3}{' '}
+                        more)
                       </summary>
                       <ul className="mt-4 space-y-4">
                         {displayedNearbyFacilities.slice(3).map((h) => {
@@ -2174,7 +2339,9 @@ const SymptomCheckPage: React.FC = () => {
                             >
                               <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                                 <div>
-                                  <p className="font-headline font-bold text-on-surface">{h.name}</p>
+                                  <p className="font-headline font-bold text-on-surface">
+                                    {h.name}
+                                  </p>
                                   <p className="text-sm text-on-surface-variant font-body mt-1">
                                     {h.address_line}
                                   </p>
@@ -2187,7 +2354,9 @@ const SymptomCheckPage: React.FC = () => {
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
                                   <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
-                                    <span className="material-symbols-outlined text-base">near_me</span>
+                                    <span className="material-symbols-outlined text-base">
+                                      near_me
+                                    </span>
                                     {h.distance_label}
                                   </span>
                                   <a
@@ -2196,7 +2365,9 @@ const SymptomCheckPage: React.FC = () => {
                                     rel="noreferrer"
                                     target="_blank"
                                   >
-                                    <span className="material-symbols-outlined text-base">map</span>
+                                    <span className="material-symbols-outlined text-base">
+                                      map
+                                    </span>
                                     Maps
                                   </a>
                                 </div>
@@ -2213,12 +2384,15 @@ const SymptomCheckPage: React.FC = () => {
 
             <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
               <h2 className="text-xl font-headline font-bold text-primary mb-2 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">payments</span>
+                <span className="material-symbols-outlined text-secondary">
+                  payments
+                </span>
                 Estimated cost context
               </h2>
               <p className="text-sm text-on-surface-variant font-body mb-6">
-                Illustrative guidance for <strong className="text-on-surface">{insurerLabel}</strong>{" "}
-                — not a personal quote; typical ranges are educational only.
+                Illustrative guidance for{' '}
+                <strong className="text-on-surface">{insurerLabel}</strong> — not a
+                personal quote; typical ranges are educational only.
               </p>
               {priceEstimateLoading ? (
                 <div className="bg-surface rounded-xl p-5 border border-outline-variant/15">
