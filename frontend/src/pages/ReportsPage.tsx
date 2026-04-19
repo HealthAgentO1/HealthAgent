@@ -261,23 +261,56 @@ const ReportsPage: React.FC = () => {
                       aria-labelledby="reports-post-visit-dx"
                       className="mt-6 rounded-xl border border-secondary/30 bg-secondary-container/15 p-5 md:p-6"
                     >
-                      <h3
-                        id="reports-post-visit-dx"
-                        className="font-headline text-sm font-bold uppercase tracking-wider text-secondary mb-2"
-                      >
-                        Post-visit Diagnosis
-                      </h3>
-                      <p className="font-body text-sm text-on-surface leading-relaxed">{postVisitDx.text}</p>
-                      {postVisitDx.source === "llm_condition" && postVisitDx.matched_condition_title ? (
-                        <p className="font-body text-xs text-on-surface-variant mt-2">
-                          Matched illustrative condition:{" "}
-                          <span className="font-medium text-on-surface">
-                            {postVisitDx.matched_condition_title}
-                          </span>
-                        </p>
-                      ) : null}
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0">
+                          <h3
+                            id="reports-post-visit-dx"
+                            className="font-headline text-sm font-bold uppercase tracking-wider text-secondary mb-2"
+                          >
+                            Post-visit Diagnosis
+                          </h3>
+                          <p className="font-body text-sm text-on-surface leading-relaxed">{postVisitDx.text}</p>
+                          {postVisitDx.source === "llm_condition" && postVisitDx.matched_condition_title ? (
+                            <p className="font-body text-xs text-on-surface-variant mt-2">
+                              Matched illustrative condition:{" "}
+                              <span className="font-medium text-on-surface">
+                                {postVisitDx.matched_condition_title}
+                              </span>
+                            </p>
+                          ) : null}
+                        </div>
+                        <Link
+                          to={`/after-visit/${encodeURIComponent(selected.session_id)}`}
+                          className="inline-flex shrink-0 items-center justify-center rounded-lg border border-primary/35 bg-primary-fixed/12 px-4 py-2 font-headline text-xs font-semibold text-primary transition-colors hover:bg-primary-fixed/20"
+                        >
+                          Update diagnosis
+                        </Link>
+                      </div>
                     </section>
-                  ) : null}
+                  ) : (
+                    <section
+                      aria-labelledby="reports-post-visit-missing"
+                      className="mt-6 rounded-xl border border-dashed border-outline-variant/45 bg-surface-container-low/60 p-5 md:p-6"
+                    >
+                      <h3
+                        id="reports-post-visit-missing"
+                        className="font-headline text-sm font-bold text-on-surface"
+                      >
+                        After your appointment
+                      </h3>
+                      <p className="mt-2 font-body text-sm leading-relaxed text-on-surface-variant">
+                        When you have seen a clinician for this check, record their official diagnosis in
+                        one place. It marks the visit complete and can help with future symptom checks.
+                      </p>
+                      <Link
+                        to={`/after-visit/${encodeURIComponent(selected.session_id)}`}
+                        className="mt-4 inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 py-2.5 font-headline text-sm font-semibold text-on-primary shadow-ambient hover:opacity-95"
+                      >
+                        Record visit diagnosis
+                        <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                      </Link>
+                    </section>
+                  )}
 
                   {!patientView ? (
                     <div className="mt-6 rounded-lg border border-dashed border-outline-variant/40 bg-surface-container-low/50 p-5">

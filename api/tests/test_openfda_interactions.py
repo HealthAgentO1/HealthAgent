@@ -84,6 +84,57 @@ class OpenfdaInteractionsTests(SimpleTestCase):
         self.assertEqual(row["severity"], "severe")
 
     @patch("api.services.openfda_interactions.fetch_openfda_label_for_medication")
+    def test_pairwise_excerpt_prefers_paragraph_with_stronger_language(self, mock_fm):
+        """When multiple paragraphs mention the paired drug, excerpt should favor stronger wording."""
+
+        def fake_med(session, med):
+            n = med["name"]
+            if n == "DrugX":
+                return (
+                    {
+                        "drug_interactions": [
+                            "DrugY may appear in many protocols as a background medication.\n\n"
+                            "Contraindicated: do not coadminister with drugy when QT prolongation is a concern."
+                        ],
+                    },
+                    {"field": "generic_name", "term": "drugx"},
+                )
+            if n == "DrugY":
+                return ({"drug_interactions": [""]}, {"field": "generic_name", "term": "drugy"})
+            return None, None
+
+        mock_fm.side_effect = fake_med
+        out = compute_pairwise_interactions([{"name": "DrugX"}, {"name": "DrugY"}])
+        row = out["pairwise"][0]
+        self.assertTrue(row["has_interaction"])
+        self.assertEqual(row["severity"], "severe")
+        self.assertIn("Contraindicated", row["description"])
+        self.assertNotIn("many protocols", row["description"])
+
+    @patch("api.services.openfda_interactions.fetch_openfda_label_for_medication")
+    def test_pairwise_detects_via_scientific_name_in_label(self, mock_fm):
+        """Label may name the generic while the patient med is brand-only; tokens include scientific_name."""
+
+        def fake_med(session, med):
+            if med["name"] == "DrugX":
+                return (
+                    {"drug_interactions": ["Monitor when given with lisinopril."]},
+                    {"field": "generic_name", "term": "drugx"},
+                )
+            if med["name"] == "Zestril":
+                return ({"drug_interactions": [""]}, {"field": "generic_name", "term": "lisinopril"})
+            return None, None
+
+        mock_fm.side_effect = fake_med
+        out = compute_pairwise_interactions(
+            [{"name": "DrugX"}, {"name": "Zestril", "scientific_name": "Lisinopril"}],
+        )
+        self.assertEqual(len(out["pairwise"]), 1)
+        row = out["pairwise"][0]
+        self.assertTrue(row["has_interaction"])
+        self.assertIn("lisinopril", row["description"].lower())
+
+    @patch("api.services.openfda_interactions.fetch_openfda_label_for_medication")
     def test_single_medication_returns_empty_pairwise(self, mock_fm):
         mock_fm.return_value = (
             {"boxed_warning": ["Risk of harm."], "openfda": {"generic_name": ["onlyone"]}},

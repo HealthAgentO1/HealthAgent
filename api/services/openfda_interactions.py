@@ -329,11 +329,30 @@ def _med_key(display_name: str) -> str:
     return (display_name or "").strip().lower()
 
 
-def _text_mentions_drug(haystack_lower: str, drug_b_name: str) -> bool:
-    for tok in _collect_match_tokens(drug_b_name):
+def _match_tokens_for_pairwise_med(med: dict[str, Any]) -> list[str]:
+    """Distinct tokens (name / scientific / common) used to find ``med`` inside label text."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for key in ("name", "scientific_name", "common_name"):
+        raw = med.get(key)
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        for tok in _collect_match_tokens(raw.strip()):
+            if len(tok) < 3:
+                continue
+            k = tok.lower()
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(tok)
+    return out
+
+
+def _text_mentions_drug(haystack_lower: str, other_med: dict[str, Any]) -> bool:
+    for tok in _match_tokens_for_pairwise_med(other_med):
         if len(tok) < 3:
             continue
-        if tok in haystack_lower:
+        if tok.lower() in haystack_lower:
             return True
     return False
 
@@ -391,6 +410,55 @@ def _severity_from_snippet(snippet_lower: str) -> str:
     if any(x in snippet_lower for x in ("monitor", "caution", "consider", "dose adjustment")):
         return "mild"
     return "moderate"
+
+
+def _smart_interaction_excerpt(haystack: str, other_med: dict[str, Any]) -> str:
+    """
+    Pick FDA label text that best highlights co-mention of ``other_med``.
+
+    Prefer whole paragraphs (split on blank lines) that both mention the other drug and carry
+    stronger interaction language; fall back to a centered window around the longest matching
+    token. This avoids leading with unrelated boilerplate when the first substring hit is a
+    passing reference.
+    """
+    raw = (haystack or "").strip()
+    if not raw:
+        return ""
+
+    tokens = _match_tokens_for_pairwise_med(other_med)
+    tokens = [t for t in tokens if len(t) >= 3]
+    if not tokens:
+        return raw[: min(800, len(raw))].strip()
+
+    low = raw.lower()
+    if not any(t.lower() in low for t in tokens):
+        return _snippet_around(raw, tokens[0], radius=420)
+
+    # Prefer longest token when narrowing a huge paragraph (brand + generic substrings).
+    tokens_by_len = sorted(tokens, key=len, reverse=True)
+
+    candidates: list[str] = []
+    for chunk in re.split(r"\n\s*\n+", raw):
+        c = chunk.strip()
+        if not c:
+            continue
+        cl = c.lower()
+        if not any(t.lower() in cl for t in tokens):
+            continue
+        if len(c) > 1100:
+            needle = next((t for t in tokens_by_len if t.lower() in cl), tokens[0])
+            c = _snippet_around(c, needle, radius=480)
+        candidates.append(c)
+
+    if not candidates:
+        needle = next((t for t in tokens_by_len if t.lower() in low), tokens[0])
+        return _snippet_around(raw, needle, radius=480)
+
+    def sort_key(s: str) -> tuple[int, int]:
+        tier = {"severe": 3, "moderate": 2, "mild": 1}[_severity_from_snippet(s.lower())]
+        return (tier, -len(s))
+
+    return max(candidates, key=sort_key)
 
 
 def _prefetch_openfda_labels(
@@ -535,8 +603,8 @@ def compute_pairwise_interactions(
             text_b = med_to_text.get(_med_key(b["name"]), "")
             low_a, low_b = text_a.lower(), text_b.lower()
 
-            hit_from_a = bool(text_a) and _text_mentions_drug(low_a, b["name"])
-            hit_from_b = bool(text_b) and _text_mentions_drug(low_b, a["name"])
+            hit_from_a = bool(text_a) and _text_mentions_drug(low_a, b)
+            hit_from_b = bool(text_b) and _text_mentions_drug(low_b, a)
 
             if not hit_from_a and not hit_from_b:
                 out["pairwise"].append(
@@ -552,11 +620,7 @@ def compute_pairwise_interactions(
                 continue
 
             if hit_from_a:
-                needle = next(
-                    (t for t in _collect_match_tokens(b["name"]) if t in low_a),
-                    _primary_search_term(b["name"]),
-                )
-                snippet = _snippet_around(text_a, needle)
+                snippet = _smart_interaction_excerpt(text_a, b)
                 sev = _severity_from_snippet(snippet.lower())
                 out["pairwise"].append(
                     {
@@ -571,11 +635,7 @@ def compute_pairwise_interactions(
                     },
                 )
             elif hit_from_b:
-                needle = next(
-                    (t for t in _collect_match_tokens(a["name"]) if t in low_b),
-                    _primary_search_term(a["name"]),
-                )
-                snippet = _snippet_around(text_b, needle)
+                snippet = _smart_interaction_excerpt(text_b, a)
                 sev = _severity_from_snippet(snippet.lower())
                 out["pairwise"].append(
                     {

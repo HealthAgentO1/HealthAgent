@@ -1,18 +1,41 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { isAxiosError } from "axios";
+import { useSymptomSessions } from "../api/queries";
 import {
   useCreateManualPriorDiagnosis,
   useDeleteManualPriorDiagnosis,
   useManualPriorDiagnoses,
 } from "../api/manualPriorDiagnoses";
+import { postVisitDiagnosisListFromSessions } from "../symptomCheck/priorOfficialDiagnoses";
+
+function formatShortDate(iso: string): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(new Date(iso));
+  } catch {
+    return "";
+  }
+}
 
 const PriorDiagnosesPage: React.FC = () => {
   const { data: rows, isLoading, isError, refetch } = useManualPriorDiagnoses();
+  const { data: sessions, isLoading: sessionsLoading } = useSymptomSessions();
   const createMutation = useCreateManualPriorDiagnosis();
   const deleteMutation = useDeleteManualPriorDiagnosis();
   const [draft, setDraft] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+
+  const manualTextKeys = useMemo(
+    () => new Set((rows ?? []).map((r) => r.text.trim().toLowerCase()).filter(Boolean)),
+    [rows],
+  );
+
+  const fromVisitRecords = useMemo(() => {
+    const list = postVisitDiagnosisListFromSessions(sessions ?? []);
+    return list.filter((item) => !manualTextKeys.has(item.text.trim().toLowerCase()));
+  }, [sessions, manualTextKeys]);
+
+  const listLoading = isLoading || sessionsLoading;
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,15 +71,15 @@ const PriorDiagnosesPage: React.FC = () => {
             My prior diagnoses
           </h1>
           <p className="max-w-2xl font-body text-base leading-relaxed text-on-surface-variant">
-            Add conditions you were told you have (for example after a clinic or hospital visit).
-            If you opt in on{" "}
+            Labels you add here and diagnoses you save after a visit on a symptom check both appear
+            below. If you opt in on{" "}
             <Link
               to="/symptom-check"
               className="font-semibold text-primary underline-offset-2 hover:underline"
             >
               Symptom Check
             </Link>
-            , these labels can be sent with your symptoms to the first guided questions step as
+            , they can be sent with your symptoms to the first guided questions step as
             background—not as a new diagnosis today, and only when you check the box.
           </p>
         </header>
@@ -128,12 +151,12 @@ const PriorDiagnosesPage: React.FC = () => {
             Saved labels
           </h2>
           <p className="max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant">
-            These entries are merged with official post-visit diagnoses from past checks when you
-            include prior diagnoses on Symptom Check (duplicates are removed automatically).
+            After-visit diagnoses come from your symptom check history; the list below is
+            de-duplicated against labels you added manually (same wording only shown once).
           </p>
 
           <div className="mt-4 border-t border-outline-variant/15 pt-4">
-            {isLoading ? (
+            {listLoading ? (
               <p className="text-sm text-on-surface-variant font-body">Loading your list…</p>
             ) : isError ? (
               <div className="space-y-3">
@@ -148,37 +171,86 @@ const PriorDiagnosesPage: React.FC = () => {
                   Retry
                 </button>
               </div>
-            ) : !rows?.length ? (
+            ) : !rows?.length && fromVisitRecords.length === 0 ? (
               <div className="rounded-lg border border-dashed border-outline-variant/45 bg-surface-container-low/60 px-4 py-8 text-center">
                 <span className="material-symbols-outlined mb-2 inline-block text-3xl text-on-surface-variant/60">
                   clinical_notes
                 </span>
                 <p className="font-body text-sm leading-relaxed text-on-surface-variant">
-                  Nothing saved yet. Add a label above to use it as optional context on your next
-                  symptom check.
+                  Nothing here yet. Add a label above, or record an official diagnosis after a visit
+                  on a completed symptom check — it will show under &quot;From after-visit
+                  records&quot; when saved.
                 </p>
               </div>
             ) : (
-              <ul className="flex flex-col gap-3">
-                {rows.map((row) => (
-                  <li
-                    key={row.diagnosis_id}
-                    className="flex flex-col gap-3 rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
-                  >
-                    <p className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
-                      {row.text}
-                    </p>
-                    <button
-                      type="button"
-                      className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 px-4 py-2 font-headline text-xs font-semibold text-error transition-colors hover:bg-error-container/25 disabled:cursor-not-allowed disabled:opacity-50"
-                      disabled={deleteMutation.isPending}
-                      onClick={() => void deleteMutation.mutateAsync(row.diagnosis_id)}
-                    >
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-8">
+                {rows && rows.length > 0 ? (
+                  <div>
+                    <h3 className="mb-3 font-headline text-xs font-bold uppercase tracking-wide text-on-surface-variant">
+                      Added on this page
+                    </h3>
+                    <ul className="flex flex-col gap-3">
+                      {rows.map((row) => (
+                        <li
+                          key={row.diagnosis_id}
+                          className="flex flex-col gap-3 rounded-lg border border-outline-variant/30 bg-surface-container-low/50 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                        >
+                          <p className="min-w-0 flex-1 font-body text-sm font-medium leading-snug text-on-surface">
+                            {row.text}
+                          </p>
+                          <button
+                            type="button"
+                            className="inline-flex shrink-0 cursor-pointer items-center justify-center rounded-lg border border-outline-variant/50 px-4 py-2 font-headline text-xs font-semibold text-error transition-colors hover:bg-error-container/25 disabled:cursor-not-allowed disabled:opacity-50"
+                            disabled={deleteMutation.isPending}
+                            onClick={() => void deleteMutation.mutateAsync(row.diagnosis_id)}
+                          >
+                            Remove
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {fromVisitRecords.length > 0 ? (
+                  <div>
+                    <h3 className="mb-3 font-headline text-xs font-bold uppercase tracking-wide text-on-surface-variant">
+                      From after-visit records
+                    </h3>
+                    <ul className="flex flex-col gap-3">
+                      {fromVisitRecords.map((item) => (
+                        <li
+                          key={`${item.session_id}-${item.text}`}
+                          className="flex flex-col gap-3 rounded-lg border border-secondary/25 bg-secondary-container/10 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="font-body text-sm font-medium leading-snug text-on-surface">
+                              {item.text}
+                            </p>
+                            <p className="mt-1 font-body text-xs text-on-surface-variant">
+                              Saved on symptom check from {formatShortDate(item.created_at)}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <Link
+                              to={`/after-visit/${encodeURIComponent(item.session_id)}`}
+                              className="inline-flex items-center justify-center rounded-lg border border-primary/35 bg-primary-fixed/12 px-3 py-2 font-headline text-xs font-semibold text-primary transition-colors hover:bg-primary-fixed/20"
+                            >
+                              Update
+                            </Link>
+                            <Link
+                              to={`/reports?session=${encodeURIComponent(item.session_id)}`}
+                              className="inline-flex items-center justify-center rounded-lg border border-outline-variant/50 px-3 py-2 font-headline text-xs font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
+                            >
+                              Report
+                            </Link>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
             )}
           </div>
         </section>
