@@ -126,26 +126,15 @@ function facilityListingFitLabel(score: number): string {
   return 'Weaker directory signals — confirm before visiting';
 }
 
-/** Coarse TIC file match — not eligibility. */
-function facilityNetworkBadge(h: NearbyFacility): { label: string; className: string } {
-  if (h.in_network === true) {
-    return {
-      label: 'Likely in-network (file match)',
-      className:
-        'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-emerald-800/25 bg-emerald-500/12 text-emerald-950',
-    };
-  }
-  if (h.in_network === false) {
-    return {
-      label: 'Not listed in posted directory',
-      className:
-        'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/40 bg-surface-container-low text-on-surface-variant',
-    };
+/** Coarse TIC file match — not eligibility. Only show a positive label when we have a directory hit. */
+function facilityNetworkBadge(h: NearbyFacility): { label: string; className: string } | null {
+  if (h.in_network !== true) {
+    return null;
   }
   return {
-    label: 'Directory match n/a',
+    label: 'Likely in network',
     className:
-      'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-outline-variant/25 bg-surface-container-lowest text-on-surface-variant',
+      'inline-flex items-center text-xs font-semibold px-2.5 py-1 rounded-md border border-emerald-800/25 bg-emerald-500/12 text-emerald-950',
   };
 }
 
@@ -2246,11 +2235,13 @@ const SymptomCheckPage: React.FC = () => {
                 established care sites.
               </p>
               <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed">
-                In-network labels use publicly posted payer transparency files when we
-                have them for your selection—they are{' '}
-                <strong className="text-on-surface">not</strong> eligibility checks. We
-                still list nearby options either way; likely in-network rows are shown
-                first when a directory match is available.
+                When a facility appears in posted payer transparency files as in-network
+                for your selection, we show a{' '}
+                <strong className="text-on-surface">Likely in-network?</strong> note—that is{' '}
+                <strong className="text-on-surface">not</strong> an eligibility
+                guarantee. Other listings have no network label; that is{' '}
+                <strong className="text-on-surface">not</strong> an out-of-network determination.
+                We still rank likely in-network matches first when directory data is available.
               </p>
               {insurance === 'fidelis' ? (
                 <p className="text-xs text-on-surface-variant font-body mb-3 leading-relaxed rounded-lg border border-outline-variant/20 bg-surface-container-low/40 px-3 py-2">
@@ -2318,9 +2309,11 @@ const SymptomCheckPage: React.FC = () => {
                               <p className="text-xs text-on-surface-variant/85 font-body mt-1">
                                 {facilityListingFitLabel(h.relevance_score)}
                               </p>
-                              <p className="mt-2">
-                                <span className={nw.className}>{nw.label}</span>
-                              </p>
+                              {nw ? (
+                                <p className="mt-2">
+                                  <span className={nw.className}>{nw.label}</span>
+                                </p>
+                              ) : null}
                             </div>
                             <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
                               <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">
@@ -2372,9 +2365,11 @@ const SymptomCheckPage: React.FC = () => {
                                   <p className="text-xs text-on-surface-variant/85 font-body mt-1">
                                     {facilityListingFitLabel(h.relevance_score)}
                                   </p>
-                                  <p className="mt-2">
-                                    <span className={nw.className}>{nw.label}</span>
-                                  </p>
+                                  {nw ? (
+                                    <p className="mt-2">
+                                      <span className={nw.className}>{nw.label}</span>
+                                    </p>
+                                  ) : null}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
                                   <span className="inline-flex items-center gap-1 text-sm font-medium text-on-surface-variant bg-surface-container-low px-3 py-1.5 rounded-md">

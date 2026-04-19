@@ -130,6 +130,18 @@ def _expand_toc_seeds_to_leaf_mrf_urls(
     return deduped
 
 
+def filter_mrf_urls_by_ambetter_state(urls: list[str], state_code: str) -> list[str]:
+    """
+    Keep only URLs whose path names an Ambetter state file, e.g. ..._ambetter-il_in-network.json.
+    ``state_code`` is two letters (case-insensitive), e.g. ``mn``, ``IL``.
+    """
+    norm = state_code.strip().lower()
+    if len(norm) != 2 or not norm.isalpha():
+        raise ValueError("ambetter_state must be a 2-letter US state code.")
+    needle = f"ambetter-{norm}_"
+    return [u for u in urls if needle in u.lower()]
+
+
 def _gather_mrf_urls_for_insurer(entry: dict[str, Any], cache_dir: Path, dry_run: bool) -> list[str]:
     slug = entry.get("slug")
     if not isinstance(slug, str) or not slug.strip():
@@ -240,6 +252,7 @@ def run_ingest(
     cache_dir: Path,
     insurer_filter: str | None,
     max_files_per_insurer: int | None,
+    ambetter_state: str | None,
     dry_run: bool,
     force_reparse: bool,
     clear_insurer: str | None,
@@ -277,6 +290,17 @@ def run_ingest(
                 "toc_urls": len(entry.get("table_of_contents_urls") or []),
             }
             continue
+
+        if ambetter_state:
+            before = len(file_urls)
+            file_urls = filter_mrf_urls_by_ambetter_state(file_urls, ambetter_state)
+            if not file_urls and before:
+                logger.warning(
+                    "No URLs left after --ambetter-state %s for slug %s (had %s URLs).",
+                    ambetter_state,
+                    slug,
+                    before,
+                )
 
         if max_files_per_insurer is not None:
             file_urls = file_urls[: max_files_per_insurer]

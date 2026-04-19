@@ -8,12 +8,16 @@ This is **not** member-specific eligibility. Posted payer files are plan- and pr
 
 ## Manifest and optional mapping
 
-- [`api/data/tic_us_manifest.json`](../api/data/tic_us_manifest.json): per-slug `table_of_contents_urls` (TOC JSON) plus optional `direct_in_network_file_urls` (direct MRF JSON links). **Order matters for `direct_in_network_file_urls`:** ingest walks that array in order, and `--max-files-per-insurer N` takes the first `N` URLs after TOC expansion—so put the states you care about first (Centene Ambetter is ordered large-state–first). TOC-derived URLs are still sorted so in-network JSON is preferred over allowed-amounts when names tie.
+- [`api/data/tic_us_manifest.json`](../api/data/tic_us_manifest.json): per-slug `table_of_contents_urls` (TOC JSON) plus optional `direct_in_network_file_urls` (direct MRF JSON links). **Order matters for `direct_in_network_file_urls`:** ingest walks that array in order, and `--max-files-per-insurer N` takes the first `N` URLs after the manifest’s combined list is built—so put the states you care about first (Centene Ambetter is ordered large-state–first). **Only TOC-derived URLs** are re-ordered (by filename heuristics: in-network / negotiated-rate paths score above allowed-amount style names); direct links are **not** re-sorted so publisher intent and `--max-files-per-insurer` caps stay predictable.
 - [`api/data/tic_reporting_entity_rules.json`](../api/data/tic_reporting_entity_rules.json): placeholder for future rules when one TOC must be split across multiple slugs.
 
 **Centene** uses direct Ambetter per-state in-network JSON URLs on `centene.com` (see manifest). Dates in the path change when Centene republishes—copy current links from [Centene price transparency](https://www.centene.com/price-transparency-files.html) if ingest starts 404ing.
 
 **United**, **Elevance/Anthem**, and **Aetna** often publish TOCs behind SPA pages, CloudFront bot rules, or signed blob URLs. If `ingest_tic_network` finds no JSON files for those slugs, add working `direct_in_network_file_urls` from each payer’s compliance page or run ingest on a machine/browser session that can resolve their current index.
+
+### URL discovery (TOC expansion)
+
+Implementation: `api/services/tic_ingest.py` (`_gather_mrf_urls_for_insurer`, `_expand_toc_seeds_to_leaf_mrf_urls`). For each insurer, **direct** manifest URLs are collected first (deduped, order preserved), then **TOC seeds** are downloaded and parsed repeatedly (`discover_json_file_urls_from_toc` in `api/services/tic_toc.py`) until leaf JSON URLs are reached or a hop limit is hit. When a single TOC fans out to very many child URLs (e.g. some regional payers), ingest treats those children as **leaf MRF links** without recursively downloading each child—this keeps deep indexes tractable. The final download list is **`direct_urls + toc_sorted`**.
 
 ### TLS on macOS / dev
 
@@ -34,6 +38,7 @@ Useful flags:
 - `--clear-insurer cigna` — delete existing rows + `TicSourceFile` rows for that slug before loading.
 - `--dry-run` — load and validate manifest only (no downloads or DB writes).
 - `--force-reparse` — reprocess a file even if the same URL+SHA was already ingested.
+- `--notes "…"` — free-text provenance stored on `NetworkDatasetVersion` alongside the git commit (optional).
 
 Downloads are cached under `data/tic_raw/` (gitignored). Content-addressed files are stored as `{sha256}.json`.
 
@@ -52,6 +57,8 @@ nohup env USE_DOCKER=1 ./scripts/tic_ingest_daemon.sh >>data/tic_raw/daemon.nohu
 ```
 
 Useful env vars: `TIC_DAEMON_INTERVAL_SECONDS` (default `86400`), `TIC_DAEMON_LOG`, `TIC_DAEMON_INSURER` (single slug per cycle), `TIC_DAEMON_FORCE_REPARSE=1`, `TIC_DAEMON_MANIFEST`, `TIC_DAEMON_RESET_LOG=1` (truncate log once on startup so `tail -f` is not confused by old errors). One-shot: `./scripts/tic_ingest_daemon.sh --once`.
+
+Each cycle invokes ingest with **`--notes "tic_daemon <UTC ISO timestamp>"`** so dataset versions created from the daemon are identifiable in the database.
 
 ## Postgres dump and restore
 
