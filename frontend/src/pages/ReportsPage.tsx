@@ -159,7 +159,7 @@ const ReportsPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => selectSession(s.session_id)}
-                        className={`w-full text-left px-4 py-3.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary ${
+                        className={`w-full cursor-pointer text-left px-4 py-3.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary ${
                           isActive
                             ? "bg-primary-fixed/12 border-l-[3px] border-l-primary"
                             : "border-l-[3px] border-l-transparent hover:bg-surface-container-high/80"
@@ -200,7 +200,7 @@ const ReportsPage: React.FC = () => {
                         type="button"
                         disabled={pdfBusy}
                         onClick={() => void handleDownloadPdf()}
-                        className="inline-flex items-center gap-2 bg-primary text-on-primary font-headline text-sm font-bold py-2.5 px-4 rounded-lg shadow-ambient hover:opacity-95 transition-opacity disabled:opacity-60"
+                        className="inline-flex cursor-pointer items-center gap-2 bg-primary text-on-primary font-headline text-sm font-bold py-2.5 px-4 rounded-lg shadow-ambient hover:opacity-95 transition-opacity disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         <span className="material-symbols-outlined text-[20px]">download</span>
                         {pdfBusy ? "Preparing…" : "Download PDF"}

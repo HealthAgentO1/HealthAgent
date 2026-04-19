@@ -217,12 +217,6 @@ const DashboardPage: React.FC = () => {
                     <span className="material-symbols-outlined text-lg">arrow_forward</span>
                   </Link>
                 )}
-                <Link
-                  className="text-on-primary font-body font-medium hover:underline px-2 py-2"
-                  to="/medication-safety"
-                >
-                  Medications
-                </Link>
               </div>
             </div>
 
@@ -294,7 +288,10 @@ const DashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="flex items-start gap-4 p-3 bg-surface-container-low rounded-lg min-w-0">
+                <Link
+                  className="flex items-start gap-4 p-3 bg-surface-container-low rounded-lg min-w-0 cursor-pointer transition-colors hover:bg-surface-container-high/60 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  to="/medication-safety"
+                >
                   <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-[18px]">prescriptions</span>
                   </div>
@@ -321,17 +318,14 @@ const DashboardPage: React.FC = () => {
                         <p className="font-body text-sm text-on-surface-variant mb-2">
                           None listed in this browser yet.
                         </p>
-                        <Link
-                          className="inline-flex items-center gap-0.5 font-body text-xs font-semibold text-primary hover:underline"
-                          to="/medication-safety"
-                        >
+                        <span className="inline-flex items-center gap-0.5 font-body text-xs font-semibold text-primary">
                           Add medications
                           <span className="material-symbols-outlined text-sm">chevron_right</span>
-                        </Link>
+                        </span>
                       </>
                     )}
                   </div>
-                </div>
+                </Link>
               </div>
             </div>
 

@@ -222,7 +222,7 @@ const SettingsProfilePage: React.FC = () => {
                 ) : null}
                 <button
                   type="button"
-                  className="rounded-lg border border-outline-variant/50 px-5 py-2 font-headline text-sm font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
+                  className="cursor-pointer rounded-lg border border-outline-variant/50 px-5 py-2 font-headline text-sm font-semibold text-primary transition-colors hover:bg-surface-container-high/80"
                   onClick={handleSignOut}
                 >
                   Sign out
