@@ -10,14 +10,6 @@ AI-assisted triage, care routing, and medication monitoring — backed by a Djan
 
 Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/89099bfc-93b8-4a9a-be53-ded2bf0ac17d
 
-<br />
-
-<img src="images/group_photo.jpeg" alt="HealthOS team" width="720" />
-
-*The team behind HealthOS*
-
-<br />
-
 </div>
 
 ---
@@ -107,10 +99,6 @@ Colored icons below point at **SVG** assets (CDN). Same technologies are spelled
       <div><sub><b>TypeScript</b></sub></div>
     </td>
     <td align="center" width="82">
-      <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/vite/vite-original.svg" alt="Vite" title="Vite" />
-      <div><sub><b>Vite</b></sub></div>
-    </td>
-    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/tailwindcss/tailwindcss-original.svg" alt="Tailwind CSS" title="Tailwind CSS" />
       <div><sub><b>Tailwind</b></sub></div>
     </td>
@@ -121,8 +109,7 @@ Colored icons below point at **SVG** assets (CDN). Same technologies are spelled
   </tr>
 </table>
 
-<sub>Python · Django · PostgreSQL · Docker · React · TypeScript · Vite · Tailwind CSS · DeepSeek</sub><br />
-<sub>DeepSeek whale icon derived from <a href="https://commons.wikimedia.org/wiki/File:DeepSeek_logo.svg">Wikimedia Commons</a> (wordmark removed; see file page for license / trademark).</sub>
+<sub>Python · Django · PostgreSQL · Docker · React · TypeScript · Tailwind CSS · DeepSeek</sub><br />
 
 </div>
 
