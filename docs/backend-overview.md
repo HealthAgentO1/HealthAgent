@@ -46,6 +46,10 @@ Inside the app directory, you will commonly find or create:
 - **`serializers.py`** (You will have to create this): Provided by DRF. Bridges `models.py` to `views.py` by converting raw database objects to and from pure JSON dicts.
 - **`admin.py`**: Maps Models into Django's out-of-the-box admin panel UI (`/admin`). It reads your schema instantly and builds a CRUD graphical interface.
 
+### Domain services (this repo)
+
+Beyond thin views, feature logic often lives under **`api/services/`**. Examples: **`symptom_llm.py`** (LLM calls for chat and survey turns), **`report_service.py`** (pre-visit report prompt, parsing, and merging medication lines from survey payloads or `MedicationProfile`), **`nppes_nearby.py`** (facility search), **`survey_session_persist.py`** (append structured survey turns to `SymptomSession.ai_conversation_log`). See **`docs/architecture.md`** for how these pieces connect to the React app.
+
 ## Getting Started Workflow
 
 Whenever adding new functionality, you usually follow this loop:

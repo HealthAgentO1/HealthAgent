@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { useSymptomSessions, type SymptomSessionListItem } from "../api/queries";
 import {
   buildPatientFriendlyPreVisit,
@@ -7,6 +7,7 @@ import {
 } from "../utils/preVisitReportPatientView";
 import { patientCheckListLabel } from "../utils/sessionShortTitle";
 import { triageBadgeClasses, triageNoteBubbleClasses } from "../utils/triageSeverityStyles";
+import { scrollAppToTop } from "../utils/scrollAppToTop";
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -54,21 +55,49 @@ function ReportSectionsView({ view }: { view: PatientFriendlyPreVisit }) {
   );
 }
 
+type ReportsLocationState = { scrollToTop?: boolean };
+
 const ReportsPage: React.FC = () => {
-  const { data: sessions, isLoading, isError, error } = useSymptomSessions();
+  const location = useLocation();
+  const { data: sessions, isLoading, isError, error, refetch, isFetching } = useSymptomSessions();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("session");
   const [pdfBusy, setPdfBusy] = useState(false);
+  /** Tracks a single refetch attempt when `?session=` is not yet in the cached list (e.g. right after a new check). */
+  const pendingSessionRefetchRef = useRef<string | null>(null);
 
   const ordered = useMemo(() => [...(sessions ?? [])], [sessions]);
 
-  useEffect(() => {
-    if (!ordered.length) return;
-    const hasSelected = selectedId && ordered.some((s) => s.session_id === selectedId);
-    if (!hasSelected) {
-      setSearchParams({ session: ordered[0].session_id }, { replace: true });
+  useLayoutEffect(() => {
+    const st = (location.state as ReportsLocationState | null)?.scrollToTop;
+    if (st) {
+      scrollAppToTop();
     }
-  }, [ordered, selectedId, setSearchParams]);
+  }, [location.state, location.key]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    if (!ordered.length) return;
+
+    const hasSelected = Boolean(selectedId && ordered.some((s) => s.session_id === selectedId));
+    if (hasSelected) {
+      pendingSessionRefetchRef.current = null;
+      return;
+    }
+
+    if (selectedId) {
+      if (pendingSessionRefetchRef.current !== selectedId) {
+        pendingSessionRefetchRef.current = selectedId;
+        void refetch();
+        return;
+      }
+      pendingSessionRefetchRef.current = null;
+      setSearchParams({ session: ordered[0].session_id }, { replace: true });
+      return;
+    }
+
+    setSearchParams({ session: ordered[0].session_id }, { replace: true });
+  }, [ordered, selectedId, isLoading, setSearchParams, refetch]);
 
   const selected = ordered.find((s) => s.session_id === selectedId) ?? null;
   const patientView = selected
@@ -186,7 +215,15 @@ const ReportsPage: React.FC = () => {
             </nav>
 
             <article className="rounded-xl border border-ghost bg-surface-container-lowest p-5 md:p-7 shadow-ambient min-h-[320px]">
-              {selected ? (
+              {selectedId && !selected && isFetching ? (
+                <div className="flex flex-col items-center justify-center min-h-[240px] gap-3 text-on-surface-variant font-body text-sm">
+                  <div
+                    className="h-9 w-9 rounded-full border-2 border-primary border-t-transparent animate-spin"
+                    aria-hidden
+                  />
+                  <p>Loading this report…</p>
+                </div>
+              ) : selected ? (
                 <>
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-2">
                     <div>

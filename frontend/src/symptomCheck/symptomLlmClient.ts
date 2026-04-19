@@ -12,6 +12,7 @@ import followupRound2Context from "./prompts/followup_round2_context.txt?raw";
 import priceEstimateContext from "./prompts/price_estimate_context.txt?raw";
 import resultsContext from "./prompts/results_context.txt?raw";
 import { apiClient } from "../api/client";
+import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
 import { parseJsonObjectFromLlm } from "./parseLlmJson";
 import {
   validateFollowUpQuestionsPayload,
@@ -174,6 +175,16 @@ export async function requestConditionAssessment(input: {
   /** Required so Django updates the same row created on the follow-up phase. */
   sessionId: string;
 }): Promise<SymptomResultsPayload> {
+  const activeMedications = loadActiveRegimen().map((m) => ({
+    name: m.name,
+    common_name: m.commonName,
+    scientific_name: m.scientificName,
+    dosage_mg: m.dosageMg,
+    frequency: m.frequency,
+    time_to_take: m.timeToTake,
+    refill_before: m.refillBefore,
+  }));
+
   const body: SymptomLlmRequestBody = {
     phase: "condition_assessment",
     system_prompt: resultsContext.trim(),
@@ -181,6 +192,7 @@ export async function requestConditionAssessment(input: {
       symptoms: input.symptoms,
       insurance_label: input.insuranceLabel,
       follow_up_answers: input.followUpAnswers,
+      active_medications: activeMedications,
     },
     session_id: input.sessionId,
   };

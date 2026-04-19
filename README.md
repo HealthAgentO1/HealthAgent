@@ -42,7 +42,7 @@ The stack is a **Django REST** backend with **PostgreSQL**, a **DeepSeek**-hoste
 - **Care routing** — Suggested care settings and taxonomy-aware routing hooks (e.g. NUCC-aligned facility search via **NPPES**).
 - **Provider & facility discovery** — Search and map-style workflows for nearby care options where integrated.
 - **Sessions** — Save, list, resume, and delete triage sessions; deep links from the dashboard.
-- **Pre-visit handoff** — Pre-visit report generation and patient-facing summaries where enabled (see `docs/`).
+- **Pre-visit handoff** — After the structured survey finishes, Django generates a clinician-oriented **`pre_visit_report`** on the symptom session. The report’s medication list prefers the user’s **Medication Safety** active regimen (dosage, frequency, time, refill) sent from the browser on the final LLM step; it can fall back to the latest server **`MedicationProfile`** when needed. Patient-facing copy and PDF export live on **Reports** (`/reports`); **View report** refetches session history, opens the matching check via **`?session=`**, and scrolls the app shell to the top (see `docs/architecture.md`).
 
 ### Medication safety
 

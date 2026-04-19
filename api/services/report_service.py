@@ -148,11 +148,108 @@ def _known_medications(session: SymptomSession) -> list[str]:
     return lines[:20]
 
 
+def _str_field(entry: dict[str, Any], *keys: str) -> str | None:
+    for k in keys:
+        v = entry.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
+def _format_active_medication_line(entry: dict[str, Any]) -> str | None:
+    name = _str_field(entry, "name", "medication")
+    if not name:
+        return None
+    dosage = _str_field(entry, "dosage_mg", "dosageMg")
+    frequency = _str_field(entry, "frequency")
+    time_take = _str_field(entry, "time_to_take", "timeToTake")
+    refill = _str_field(entry, "refill_before", "refillBefore")
+    common = _str_field(entry, "common_name", "commonName")
+    scientific = _str_field(entry, "scientific_name", "scientificName")
+
+    detail_parts: list[str] = []
+    if dosage:
+        detail_parts.append(f"dosage: {dosage} mg")
+    if frequency:
+        detail_parts.append(f"frequency: {frequency}")
+    if time_take:
+        detail_parts.append(f"time: {time_take}")
+    if refill:
+        detail_parts.append(f"refill: {refill}")
+    if common and common.casefold() != name.casefold():
+        detail_parts.append(f"also known as: {common}")
+    if scientific and scientific.casefold() != name.casefold():
+        detail_parts.append(f"generic: {scientific}")
+
+    if not detail_parts:
+        return name
+    return name + " — " + "; ".join(detail_parts)
+
+
+def _active_medication_lines_from_list(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        line = _format_active_medication_line(item)
+        if line:
+            out.append(line)
+    return out
+
+
+def _latest_condition_assessment_payload(session: SymptomSession) -> dict[str, Any] | None:
+    for entry in reversed(session.ai_conversation_log or []):
+        if not isinstance(entry, dict) or entry.get("role") != "survey_turn":
+            continue
+        if entry.get("phase") != "condition_assessment":
+            continue
+        payload = entry.get("user_payload")
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def medication_lines_for_session(session: SymptomSession) -> list[str]:
+    """
+    Prefer medications sent with the structured symptom check (browser active regimen),
+    including dosage / frequency / time / refill. Fall back to the latest MedicationProfile names.
+    """
+    payload = _latest_condition_assessment_payload(session)
+    if payload:
+        active = _active_medication_lines_from_list(payload.get("active_medications"))
+        if active:
+            return active
+    return _known_medications(session)
+
+
+def _medication_primary_key(line: str) -> str:
+    """
+    Normalize a medication line for deduplication. Profile lines use 'Name — dosage: …';
+    the LLM often returns prose like 'Adderall 10 mg daily…' without the em dash, which
+    must still match the same drug as the formatted profile line.
+    """
+    s = str(line).strip()
+    if not s:
+        return ""
+    if " — " in s:
+        return s.split(" — ", 1)[0].strip().casefold()
+    parts = s.split()
+    name_parts: list[str] = []
+    for p in parts:
+        if any(ch.isdigit() for ch in p):
+            break
+        name_parts.append(p)
+    key = " ".join(name_parts).strip() if name_parts else s
+    return key.casefold()
+
+
 def merge_profile_and_llm_medications(
     profile_meds: list[str],
     llm_meds: list[str],
 ) -> list[str]:
-    """Profile list first (saved regimen), then LLM-only additions; case-insensitive dedupe."""
+    """Profile list first (saved regimen), then LLM-only additions; dedupe by medication name."""
     seen: set[str] = set()
     out: list[str] = []
     for source in (profile_meds, llm_meds):
@@ -160,7 +257,7 @@ def merge_profile_and_llm_medications(
             name = str(raw).strip()
             if not name:
                 continue
-            key = name.casefold()
+            key = _medication_primary_key(name)
             if key in seen:
                 continue
             seen.add(key)
@@ -170,7 +267,7 @@ def merge_profile_and_llm_medications(
 
 def build_pre_visit_report_prompt(session: SymptomSession) -> str:
     transcript = _serialize_conversation(session)
-    medications = _known_medications(session)
+    medications = medication_lines_for_session(session)
     medication_section = (
         "\nKnown medications:\n- " + "\n- ".join(medications)
         if medications
@@ -212,7 +309,7 @@ def build_pre_visit_report(session: SymptomSession) -> dict[str, Any]:
     raw = complete_llm_chat(system_prompt, trimmed)
     report = parse_pre_visit_report_response(raw)
 
-    profile_meds = _known_medications(session)
+    profile_meds = medication_lines_for_session(session)
     llm_meds = report.get("medications")
     llm_list = llm_meds if isinstance(llm_meds, list) else []
     report["medications"] = merge_profile_and_llm_medications(profile_meds, llm_list)

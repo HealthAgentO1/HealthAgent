@@ -5,7 +5,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from api.models import MedicationProfile, SymptomSession
-from api.services.report_service import build_pre_visit_report, merge_profile_and_llm_medications
+from api.services.report_service import (
+    build_pre_visit_report,
+    medication_lines_for_session,
+    merge_profile_and_llm_medications,
+)
 
 User = get_user_model()
 
@@ -113,3 +117,62 @@ class ReportServiceTests(TestCase):
             ["metformin", "Aspirin"],
         )
         self.assertEqual(merged, ["Lisinopril", "Metformin", "Aspirin"])
+
+    def test_merge_dedupes_short_llm_name_when_profile_has_detail_line(self):
+        merged = merge_profile_and_llm_medications(
+            ["Lisinopril — dosage: 10 mg; frequency: daily"],
+            ["lisinopril", "Aspirin"],
+        )
+        self.assertEqual(merged, ["Lisinopril — dosage: 10 mg; frequency: daily", "Aspirin"])
+
+    def test_merge_dedupes_llm_prose_lines_against_formatted_profile(self):
+        merged = merge_profile_and_llm_medications(
+            [
+                "Adderall — dosage: 10 mg; frequency: 1x daily; time: morning with food; refill: 14 days; generic: amphetamine salts",
+                "ibuprofen — dosage: 500 mg; frequency: 5x daily; time: with food; refill: 1 day",
+            ],
+            [
+                "Adderall 10 mg daily in the morning with food",
+                "ibuprofen 500 mg 5 times daily with food",
+            ],
+        )
+        self.assertEqual(len(merged), 2)
+        self.assertTrue(merged[0].startswith("Adderall —"))
+        self.assertTrue(merged[1].startswith("ibuprofen —"))
+
+    def test_medication_lines_for_session_uses_active_medications_payload(self):
+        session = SymptomSession.objects.create(
+            user=self.user,
+            ai_conversation_log=[
+                {
+                    "role": "survey_turn",
+                    "phase": "condition_assessment",
+                    "user_payload": {
+                        "symptoms": "cough",
+                        "active_medications": [
+                            {
+                                "name": "Metformin",
+                                "dosage_mg": "500",
+                                "frequency": "twice daily",
+                                "time_to_take": "morning",
+                                "refill_before": "14 days",
+                            },
+                            {"name": "Aspirin"},
+                        ],
+                    },
+                },
+            ],
+        )
+        MedicationProfile.objects.create(
+            user=self.user,
+            medications_raw="OnlyFromProfile",
+            extracted_medications=[{"name": "OnlyFromProfile"}],
+        )
+        lines = medication_lines_for_session(session)
+        self.assertEqual(len(lines), 2)
+        self.assertIn("Metformin", lines[0])
+        self.assertIn("500", lines[0])
+        self.assertIn("twice daily", lines[0])
+        self.assertIn("morning", lines[0])
+        self.assertIn("14 days", lines[0])
+        self.assertEqual(lines[1], "Aspirin")

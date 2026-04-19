@@ -2,7 +2,7 @@
 
 **Status:** Draft  
 **Author:** Carl Gombert
-**Last updated:** 2026-04-18 (survey LLM via Django `symptom/survey-llm/`)
+**Last updated:** 2026-04-19 (survey LLM via Django `symptom/survey-llm/`; pre-visit report + `active_medications` from browser regimen)
 
 ---
 
@@ -40,7 +40,7 @@ User completes symptom survey (free text + structured follow-ups)
     → UI Display: nearby hospitals or providers + illustrative in-network price *ranges*
           (not the member's actual liability; deductible/coinsurance apply)
     → Booking: confirm slot (mock or real)
-    → Pre-visit report: structured summary for doctor
+    → Pre-visit report: structured summary for doctor (medications prefer browser active regimen with dosage/frequency/time/refill when present)
 ```
 
 ### Frontend (current prototype)
@@ -50,12 +50,12 @@ The `/symptom-check` route implements the **survey flow** in the browser:
 | Step | Behavior |
 |------|----------|
 | 1 — Intake | Free-text symptoms + insurer selection (fixed carrier list) + **validated US address** (street, city, state, 5-digit ZIP). Address is required to rank nearby facilities on step 3. |
-| 2 — Follow-up | On **Continue**, the app issues the **first** LLM request. Prompt **system** text is loaded from `frontend/src/symptomCheck/prompts/followup_context.txt`; **user** context is JSON (`symptoms`, `insurance_label`). The model must return **JSON only** describing a `questions[]` array. Each question has an `input_type` so the UI can render radios, checkboxes, text areas, or a numeric scale. |
-| 3 — Results | On **See results**, the **second** LLM request sends the same symptom/insurer context plus structured follow-up answers. Prompt **system** text comes from `frontend/src/symptomCheck/prompts/results_context.txt`. Parsed JSON drives **possible conditions** (title, explanation, why it remains plausible, per-condition severity), **overall_patient_severity**, and **`care_taxonomy`** (suggested care setting, **NUCC taxonomy code strings**, internal rationale). **`care_taxonomy` is not shown as a primary patient label**; its `taxonomy_codes` drive **`POST /api/symptom/nearby-facilities/`** together with the saved address. The UI lists **NPPES organizational** providers near the user’s ZIP, sorted by **geodesic distance** after Census geocoding (see `api/services/nppes_nearby.py`). The first three rows are visible by default; additional matches appear under a disclosure. **Estimated cost** copy remains **illustrative and not tied to listed facilities** until billing integration. |
+| 2 — Follow-up | On **Continue**, the app issues the **first** LLM request. Prompt **system** text is loaded from `frontend/src/symptomCheck/prompts/followup_context.txt`; **user** context is JSON (`symptoms`, `insurance_label`). The model must return **JSON only** describing a `questions[]` array. Each question has an `input_type` so the UI can render radios, checkboxes, text areas, or a numeric scale. The server returns a **`session_id`**; the client sends it on later turns. If the model returns a second round of questions, the app uses **`followup_round2_context.txt`** and phase `followup_questions_round_2` before results. |
+| 3 — Results | On **See results**, the **condition assessment** LLM request sends symptom/insurer context, structured follow-up answers, and **`active_medications`** from the user’s Medication Safety **`localStorage`** regimen (`symptomLlmClient.ts` / `medicationRegimenStorage.ts`) so the backend can attach the full list with optional fields to the pre-visit report. Prompt **system** text comes from `frontend/src/symptomCheck/prompts/results_context.txt`. Parsed JSON drives **possible conditions** (title, explanation, why it remains plausible, per-condition severity), **overall_patient_severity**, and **`care_taxonomy`** (suggested care setting, **NUCC taxonomy code strings**, internal rationale). **`care_taxonomy` is not shown as a primary patient label**; its `taxonomy_codes` drive **`POST /api/symptom/nearby-facilities/`** together with the saved address. The UI lists **NPPES organizational** providers near the user’s ZIP, sorted by **relevance and distance** (see `api/services/nppes_nearby.py`). The first three rows are visible by default; additional matches appear under a disclosure. **Estimated cost** copy remains **illustrative and not tied to listed facilities** until billing integration. After success, **View report** refetches session history, navigates to **`/reports?session=<uuid>`** with router state so the shell **scrolls to the top**, and the Reports page selects that session once the list includes it (see `docs/architecture.md`). |
 
 **Client modules:** `frontend/src/symptomCheck/symptomLlmClient.ts` builds `{ phase, system_prompt, user_payload }` and `POST`s it to **`POST /api/symptom/survey-llm/`** via `apiClient` (requires JWT — users who are not signed in see an error). **Parsing** tolerates optional Markdown JSON fences; **validation** is in `validatePayloads.ts` so bad model output fails fast with a user-visible error. **`frontend/src/symptomCheck/nppesFacilitiesClient.ts`** `POST`s address + `taxonomy_codes` to **`POST /api/symptom/nearby-facilities/`** and validates the facility list JSON.
 
-**Backend:** `api/views_symptom.py` (`SymptomSurveyLlmView`) forwards to `complete_symptom_survey_turn` in `api/services/symptom_llm.py` (OpenAI-compatible or Anthropic per `LLM_PROVIDER`). The HTTP response is `{ "raw_text": "<model output>", "phase": "..." }`. **`SymptomNearbyFacilitiesView`** calls `find_nearby_facilities` in **`api/services/nppes_nearby.py`** (NPPES + Census; no API key).
+**Backend:** `api/views_symptom.py` (`SymptomSurveyLlmView`) forwards to `complete_symptom_survey_turn` in `api/services/symptom_llm.py` (OpenAI-compatible or Anthropic per `LLM_PROVIDER`). The HTTP response is `{ "raw_text": "<model output>", "phase": "...", "session_id": "<uuid>" }`. On **`condition_assessment`**, after persisting the turn, Django runs **`build_pre_visit_report`** in **`api/services/report_service.py`** (transcript + formatted medication lines + LLM JSON for chief complaint, HPI, etc.) and saves **`pre_visit_report`** on the session. **`SymptomNearbyFacilitiesView`** calls `find_nearby_facilities` in **`api/services/nppes_nearby.py`** (NPPES + Census; no API key).
 
 Per-insurer **cost** text on the results page is **generic illustrative copy** (not facility-specific) until benefit integration exists.
 
@@ -107,15 +107,18 @@ class SymptomSession(models.Model):
 
 ## Pre-Visit Report Format
 
+The structured survey stores an LLM-shaped object on **`SymptomSession.pre_visit_report`**, including fields such as **`chief_complaint`**, **`hpi`**, **`patient_description`**, **`risk_factors`**, **`triage_level`**, and **`medications`** (array of strings). Medication strings are typically **one line per drug**, optionally including regimen details when **`active_medications`** was present on the final survey turn (e.g. `Name — dosage: 10 mg; frequency: daily; …`). The patient-facing **Reports** page maps this JSON via `frontend/src/utils/preVisitReportPatientView.ts`.
+
+A minimal **intermediate** shape may exist briefly before the full LLM merge (see `apply_condition_assessment_summary` in `api/services/survey_session_persist.py`). Chat-only sessions (`POST /api/symptom/chat/`) may still rely on the latest **`MedicationProfile`** names when building reports if no browser regimen was sent.
+
 ```json
 {
-  "patient_summary": "...",
-  "reported_symptoms": ["..."],
-  "duration": "...",
+  "chief_complaint": "...",
+  "hpi": "...",
   "triage_level": "routine",
-  "relevant_history": "...",
-  "current_medications": ["..."],
-  "questions_for_provider": ["..."]
+  "patient_description": "...",
+  "risk_factors": ["..."],
+  "medications": ["Metformin — dosage: 500 mg; frequency: twice daily; time: morning; refill: 14 days", "Aspirin"]
 }
 ```
 
