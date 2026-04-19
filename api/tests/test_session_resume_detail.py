@@ -127,7 +127,16 @@ class SymptomSessionResumeDetailTests(APITestCase):
                 {
                     "role": "survey_turn",
                     "phase": "followup_questions",
-                    "user_payload": {"symptoms": "cough", "insurance_label": "Aetna"},
+                    "user_payload": {
+                        "symptoms": "cough",
+                        "insurance_label": "Aetna",
+                        "practice_location": {
+                            "street": "123 Main St",
+                            "city": "Boston",
+                            "state": "MA",
+                            "postal_code": "02108",
+                        },
+                    },
                     "raw_text": '{"questions":[{"id":"q1","prompt":"Dry?","required":true,"input_type":"single_choice","options":[{"id":"y","label":"Yes"},{"id":"n","label":"No"}]}]}',
                 }
             ],
@@ -137,6 +146,7 @@ class SymptomSessionResumeDetailTests(APITestCase):
         self.assertEqual(res.data["resume_step"], "followup")
         self.assertEqual(res.data["symptoms"], "cough")
         self.assertIn("followup_raw_text", res.data)
+        self.assertEqual(res.data.get("practice_location", {}).get("city"), "Boston")
 
     def test_resume_results_two_survey_turns(self):
         s = SymptomSession.objects.create(
@@ -152,7 +162,16 @@ class SymptomSessionResumeDetailTests(APITestCase):
                 {
                     "role": "survey_turn",
                     "phase": "condition_assessment",
-                    "user_payload": {"symptoms": "headache", "insurance_label": "United Healthcare"},
+                    "user_payload": {
+                        "symptoms": "headache",
+                        "insurance_label": "United Healthcare",
+                        "practice_location": {
+                            "street": "9 DeKalb Ave",
+                            "city": "Brooklyn",
+                            "state": "NY",
+                            "postal_code": "11201",
+                        },
+                    },
                     "raw_text": '{"overall_patient_severity":"mild","conditions":[{"title":"Tension","explanation":"x","why_possible":"y","condition_severity":"mild"}],"care_taxonomy":{"suggested_care_setting":"PCP","taxonomy_codes":[],"rationale_for_routing":"z"}}',
                 },
             ],
@@ -162,6 +181,7 @@ class SymptomSessionResumeDetailTests(APITestCase):
         self.assertEqual(res.data["resume_step"], "results")
         self.assertIn("results_raw_text", res.data)
         self.assertIn("followup_raw_text", res.data)
+        self.assertEqual(res.data.get("practice_location", {}).get("postal_code"), "11201")
 
     def test_resume_results_includes_price_estimate_raw_text(self):
         price_json = '{"cost_range_label":"~$50–$200","cost_range_explanation":"Cached line."}'

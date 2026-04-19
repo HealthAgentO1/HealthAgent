@@ -35,7 +35,7 @@ The **Medication Safety** page (`/medication-safety`, authenticated) supports:
 
 3. **Symptom Check pre-visit reports** — The structured symptom survey does **not** read the regimen only from `MedicationProfile`. On the final **`condition_assessment`** call, the SPA sends the same active regimen as **`active_medications`** in `user_payload` so Django can persist it on the session and include **all** drugs with dosage, frequency, time, and refill in **`SymptomSession.pre_visit_report`** (see `docs/architecture.md`, `api/services/report_service.py`). Users can open the resulting report from **Reports** or via **View report** on the Symptom Check results step.
 4. **Detail** — `/medication-safety/med/:medicationId` allows editing the same optional fields and **removing** the drug after an in-app confirmation step.
-5. **Interaction conflicts (list page)** — When at least one medication is in the regimen, the SPA calls **`POST /api/medication/regimen-safety/`** with the regimen’s `name` and optional `rxnorm_id`, `scientific_name`, and `common_name` per row. The **pairwise** interaction hints (only) render in **`DrugInteractionConflictsPanel`** (`frontend/src/medicationSafety/DrugInteractionConflictsPanel.tsx`) when the API finds conflicting label wording between two drugs. **Per-drug** SPL excerpts and recalls render on **`MedicationSafetyDetailPage`** via **`MedicationDetailSafetyPanel`**. Regimen cards show a **!** badge when aggregated label/recall risk is **high** (boxed warning, contraindications, or Class I recall). This call requires authentication and does **not** persist a new `MedicationProfile` (the regimen itself remains browser-local).
+5. **Interaction conflicts (list page)** — When at least one medication is in the regimen, the SPA requests regimen safety via **`loadRegimenSafetyCached`** (`frontend/src/medicationSafety/regimenSafetyCache.ts`), which `POST`s **`/api/medication/regimen-safety/`** only on cache miss or regimen identity change, and dedupes concurrent fetches. Payload: each row’s `name` and optional `rxnorm_id`, `scientific_name`, and `common_name`. The **pairwise** interaction hints render in **`DrugInteractionConflictsPanel`** (`frontend/src/medicationSafety/DrugInteractionConflictsPanel.tsx`) when the API finds conflicting label wording between two drugs. When the server’s **medication OpenAI-compatible client** is configured (`OPENAI_API_KEY`, or **`DEEPSEEK_API_KEY`** which Django maps into the same effective key — see `backend/settings.py`), the backend may call the LLM after openFDA only for **in-process cache misses**: plain-language **`description_plain`** (see **Plain-language layer** below). The conflict modal shows **Plain-language summary** when present and tucks the raw SPL excerpt under **Original FDA label wording**; list previews prefer plain text via **`concisePairwiseExplanation`** (`frontend/src/medicationSafety/conciseText.ts`). **Per-drug** SPL excerpts and recalls render on **`MedicationSafetyDetailPage`** via **`MedicationDetailSafetyPanel`**. Regimen cards show a **!** badge when aggregated label/recall risk is **high** (boxed warning, contraindications, or Class I recall). This call requires authentication and does **not** persist a new `MedicationProfile` (the regimen itself remains browser-local).
 
 **API errors:** The extract endpoint returns **`{ "error": "..." }`** for LLM failures (typically HTTP **502**), configuration issues (**503**), or bad input (**400**). The regimen-safety endpoint returns **400** for an empty or invalid `medications` array, **401** if unauthenticated, and **502** if the safety pipeline raises unexpectedly. The UI surfaces these messages in the alerts panel when the regimen-safety request fails.
 
@@ -47,9 +47,10 @@ The **Medication Safety** page (`/medication-safety`, authenticated) supports:
 User builds active regimen (localStorage) + optional LLM extract when adding a drug
     → POST /api/medication/regimen-safety/ with { medications: [{ name, rxnorm_id? }] }
     → openFDA drug/label.json: SPL sections per drug + pairwise interaction text scan
+    → (If LLM configured) one batched JSON call for in-process cache misses: ``enrich_pairwise_with_plain_language`` → ``description_plain`` per positive pair
     → openFDA enforcement: recalls per drug name
     → Aggregate safety_score (low / moderate / high) from interaction severities + recalls
-    → Interaction alerts panel shows pairwise hints (severe / moderate / mild), label excerpts, recalls
+    → Interaction alerts panel shows pairwise hints (severe / moderate / mild), excerpts / summaries, recalls
 ```
 
 Full check with free text + persistence: **`POST /api/medication/check/`** runs LLM extraction, the same openFDA + recall pipeline, and stores a **`MedicationProfile`**.
@@ -66,6 +67,19 @@ Heuristic labels attached to each **positive** pairwise row in `interaction_resu
 
 Absence of a textual mention in section 7–style text does **not** prove safety.
 
+### Plain-language layer (optional)
+
+- **Module:** `api/services/interaction_excerpt_plain_language.py` — after `compute_pairwise_interactions`, mutates positive pairwise rows in place with `description_plain` when the LLM returns valid JSON.
+- **Prompt:** `api/prompts/interaction_excerpt_plain_system.txt` — asks for short, non-clinical paraphrases **only** from the supplied excerpt + drug names + direction; output schema is `{ "items": [ { "i": <row index>, "plain": "..." } ] }` matching batched input `{ "conflicts": [ ... ] }`.
+- **HTTP client:** `complete_openai_compatible_json` in `api/services/medication_llm_service.py` (same OpenAI-compatible stack as extraction: model `LLM_MODEL`, base URL from settings).
+- **Caching:** In-process `OrderedDict` keyed by SHA-256 of `(drug_a, drug_b, direction, excerpt)`; TTL and max size from **`INTERACTION_PLAIN_CACHE_TTL_SECONDS`** (default 7 days) and **`INTERACTION_PLAIN_CACHE_MAX_ENTRIES`** (default 1024). Failures are logged and non-fatal; the API still returns openFDA excerpts.
+
+### Client session cache (regimen safety)
+
+- **Storage:** `sessionStorage` key **`healthagent_regimen_safety_cache_v2`** (`frontend/src/medicationSafety/regimenSafetyCache.ts`).
+- **Invalidation:** Fingerprint includes medication **identity** (client id, trimmed name, RxNorm, common/scientific names); changing only dosage/frequency/time/refill does **not** invalidate the openFDA payload.
+- **Scope:** Lowercased signed-in email must match the envelope; switching accounts avoids cross-user reuse.
+- **Deduping:** Concurrent requests for the same fingerprint share one in-flight `Promise`.
 ### Aggregate `safety_score.level`
 
 | Level | Meaning (automated) |
@@ -141,6 +155,7 @@ class MedicationAlert(models.Model):
       "has_interaction": true,
       "severity": "moderate",
       "description": "… excerpt from label …",
+      "description_plain": "Optional LLM plain-English summary of the excerpt when an API key is configured.",
       "direction": "FDA label (Warfarin) drug interactions section references Aspirin."
     }
   ],

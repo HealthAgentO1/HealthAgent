@@ -21,6 +21,7 @@ class SessionResumePayload(TypedDict, total=False):
     created_at: str
     # Official diagnosis after an in-person visit (patient-entered); null if not recorded.
     post_visit_diagnosis: dict[str, Any] | None
+    practice_location: dict[str, str]
 
 
 def _survey_turns(log: list | None) -> list[dict[str, Any]]:
@@ -50,6 +51,41 @@ def _payload_symptoms_insurance(payload: dict[str, Any] | None) -> tuple[str, st
     sym = s.strip() if isinstance(s, str) else ""
     ins = i.strip() if isinstance(i, str) else ""
     return sym, ins
+
+
+def _payload_practice_location(
+    payload: dict[str, Any] | None,
+) -> dict[str, str] | None:
+    """US practice address from survey `user_payload.practice_location` (SPA step 1)."""
+    if not isinstance(payload, dict):
+        return None
+    raw = payload.get("practice_location")
+    if not isinstance(raw, dict):
+        return None
+    street = raw.get("street")
+    city = raw.get("city")
+    state = raw.get("state")
+    postal = raw.get("postal_code")
+    if not all(isinstance(x, str) for x in (street, city, state, postal)):
+        return None
+    street_s, city_s, state_s, postal_s = (
+        street.strip(),
+        city.strip(),
+        state.strip().upper(),
+        postal.strip(),
+    )
+    if len(street_s) < 3 or len(city_s) < 2:
+        return None
+    if len(state_s) != 2 or not state_s.isalpha():
+        return None
+    if len(postal_s) != 5 or not postal_s.isdigit():
+        return None
+    return {
+        "street": street_s,
+        "city": city_s,
+        "state": state_s,
+        "postal_code": postal_s,
+    }
 
 
 def build_session_resume_payload(session: SymptomSession) -> SessionResumePayload:
@@ -108,6 +144,11 @@ def build_session_resume_payload(session: SymptomSession) -> SessionResumePayloa
             base["insurance_label"] = ins_l or ins_f
             if first_followup and isinstance(first_followup.get("raw_text"), str):
                 base["followup_raw_text"] = first_followup["raw_text"]
+            loc = _payload_practice_location(up_last) or _payload_practice_location(
+                up_first
+            )
+            if loc is not None:
+                base["practice_location"] = loc
             return base
 
         if first_followup and isinstance(first_followup.get("raw_text"), str):
@@ -121,6 +162,9 @@ def build_session_resume_payload(session: SymptomSession) -> SessionResumePayloa
             sym0, ins0 = _payload_symptoms_insurance(up0)
             base["symptoms"] = sym0
             base["insurance_label"] = ins0
+            loc0 = _payload_practice_location(up0 if isinstance(up0, dict) else None)
+            if loc0 is not None:
+                base["practice_location"] = loc0
             return base
 
     if any(isinstance(e, dict) and e.get("role") in ("user", "assistant") for e in log):

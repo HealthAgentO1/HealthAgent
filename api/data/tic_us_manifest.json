@@ -1,0 +1,59 @@
+{
+  "insurers": [
+    {
+      "slug": "centene",
+      "table_of_contents_urls": [],
+      "direct_in_network_file_urls": [
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ca_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-tx_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-fl_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-pa_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-il_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-oh_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ga_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-nc_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-nj_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-mi_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-wa_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-az_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-tn_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-mo_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-in_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ky_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-la_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-sc_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ar_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ia_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-nv_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ne_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-nh_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-de_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ok_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ms_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-ks_in-network.json",
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_centene-management-company-llc_ambetter-al_in-network.json"
+      ]
+    },
+    {
+      "slug": "cigna",
+      "table_of_contents_urls": [
+        "https://www.cigna.com/static/mrf/latest.json"
+      ],
+      "direct_in_network_file_urls": []
+    },
+    {
+      "slug": "healthnet",
+      "table_of_contents_urls": [
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_healthnet_index.json"
+      ],
+      "direct_in_network_file_urls": []
+    },
+    {
+      "slug": "fidelis",
+      "table_of_contents_urls": [
+        "https://www.centene.com/content/dam/centene/Centene%20Corporate/json/DOCUMENT/2026-03-31_fidelis_index.json"
+      ],
+      "direct_in_network_file_urls": []
+    }
+  ]
+}

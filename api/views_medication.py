@@ -152,9 +152,13 @@ class RegimenSafetyView(APIView):
     """
     POST /api/medication/regimen-safety/
 
-    openFDA-only analysis for the browser-stored active regimen: SPL sections per drug,
+    openFDA analysis for the browser-stored active regimen: SPL sections per drug,
     pairwise label interaction hints, enforcement recalls, and aggregate score.
-    Does not call the LLM and does not persist a MedicationProfile row.
+
+    When ``OPENAI_API_KEY`` (or ``DEEPSEEK_API_KEY``) is configured, runs one batched
+    optional LLM pass to add ``description_plain`` on positive pairwise rows for UI
+    readability; failures fall back to openFDA-only fields. Does not persist a
+    MedicationProfile row.
     """
 
     permission_classes = [IsAuthenticated]

@@ -56,6 +56,13 @@ export interface SymptomSessionResume {
   results_raw_text?: string;
   /** Last `price_estimate_context` survey turn, when present — avoids refetching on resume. */
   price_estimate_raw_text?: string;
+  /** Step-1 US address echoed from persisted survey turns (for NPPES resume). */
+  practice_location?: {
+    street: string;
+    city: string;
+    state: string;
+    postal_code: string;
+  } | null;
   triage_level: string | null;
   created_at: string;
   post_visit_diagnosis?: PostVisitDiagnosis | null;

@@ -9,6 +9,10 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import SymptomSession
+from .services.insurer_network_runtime import (
+    npis_marked_in_network,
+    slug_supports_org_facility_network_match,
+)
 from .services.nppes_nearby import find_nearby_facilities
 from .services.report_service import build_pre_visit_report
 from .services.survey_session_persist import (
@@ -26,6 +30,20 @@ from users.us_states import US_STATE_CODES
 
 logger = logging.getLogger(__name__)
 
+INSURER_SLUGS = frozenset(
+    {
+        "centene",
+        "cigna",
+        "healthnet",
+        "fidelis",
+        "unitedhealthcare",
+        "elevance",
+        "humana",
+        "bluecross",
+        "aetna",
+        "other",
+    }
+)
 
 class SymptomChatRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
@@ -57,11 +75,26 @@ class SymptomNearbyFacilitiesSerializer(serializers.Serializer):
         required=False,
         allow_null=True,
     )
+    insurer_slug = serializers.CharField(
+        max_length=32,
+        required=False,
+        allow_blank=True,
+        default="",
+        trim_whitespace=True,
+    )
 
     def validate_state(self, value: str) -> str:
         v = value.strip().upper()
         if v not in US_STATE_CODES:
             raise serializers.ValidationError("Enter a valid US state.")
+        return v
+
+    def validate_insurer_slug(self, value: str) -> str:
+        v = (value or "").strip().lower()
+        if not v:
+            return ""
+        if v not in INSURER_SLUGS:
+            raise serializers.ValidationError("Unknown insurer_slug.")
         return v
 
 
@@ -72,7 +105,12 @@ class SymptomSurveyLlmSerializer(serializers.Serializer):
     """
 
     phase = serializers.ChoiceField(
-        choices=["followup_questions", "followup_questions_round_2", "condition_assessment"]
+        choices=[
+            "followup_questions",
+            "followup_questions_round_2",
+            "condition_assessment",
+            "price_estimate_context",
+        ]
     )
     system_prompt = serializers.CharField(min_length=1, max_length=200_000)
     user_payload = serializers.JSONField()
@@ -272,6 +310,7 @@ class SymptomNearbyFacilitiesView(APIView):
         postal_code = ser.validated_data["postal_code"]
         taxonomy_codes = ser.validated_data["taxonomy_codes"] or []
         suggested_care_setting = ser.validated_data.get("suggested_care_setting")
+        insurer_slug = ser.validated_data.get("insurer_slug") or ""
 
         try:
             payload = find_nearby_facilities(
@@ -290,5 +329,20 @@ class SymptomNearbyFacilitiesView(APIView):
                 {"detail": "Unable to load nearby facilities. Please try again."},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+
+        facilities = payload.get("facilities")
+        if isinstance(facilities, list) and insurer_slug and slug_supports_org_facility_network_match(
+            insurer_slug
+        ):
+            npi_list = [f.get("npi") for f in facilities if isinstance(f, dict)]
+            npi_list = [n for n in npi_list if isinstance(n, str)]
+            in_network = npis_marked_in_network(insurer_slug, npi_list)
+            for row in facilities:
+                if isinstance(row, dict) and isinstance(row.get("npi"), str):
+                    row["in_network"] = row["npi"] in in_network
+        elif isinstance(facilities, list):
+            for row in facilities:
+                if isinstance(row, dict):
+                    row["in_network"] = None
 
         return Response(payload, status=status.HTTP_200_OK)

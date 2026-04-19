@@ -29,6 +29,11 @@ data/
 local_settings.py
 db.sqlite3
 
+# CMS TIC raw downloads (offline ingest)
+data/tic_raw/
+# Local SQL exports of network tables (regenerate with scripts/dump_network_tables_sql.sh)
+data/network_providers.sql
+
 # OS / editor
 .DS_Store
 .idea/

@@ -1,0 +1,4 @@
+{
+  "_comment": "Optional v2: when one shared TOC must be split across multiple app slugs, add rules here and extend the ingest command to filter URLs or rows by reporting_entity_name substrings.",
+  "rules": []
+}

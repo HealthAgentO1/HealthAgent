@@ -13,6 +13,8 @@ export type PairwiseInteractionRow = {
   has_interaction: boolean;
   severity: string | null;
   description: string;
+  /** Optional batched LLM plain-language summary of ``description`` (server-generated). */
+  description_plain?: string | null;
   direction: string | null;
 };
 
