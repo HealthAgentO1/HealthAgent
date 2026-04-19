@@ -6,6 +6,7 @@ import DashboardPage from "./pages/DashboardPage";
 import SymptomCheckPage from "./pages/SymptomCheckPage";
 import CareMatchesPage from "./pages/CareMatchesPage";
 import MedicationSafetyPage from "./pages/MedicationSafetyPage";
+import ReportsPage from "./pages/ReportsPage";
 import EmergencyContactPage from "./pages/EmergencyContactPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
@@ -24,6 +25,7 @@ function App() {
           <Route path="/symptom-check" element={<SymptomCheckPage />} />
           <Route path="/care-matches" element={<CareMatchesPage />} />
           <Route path="/medication-safety" element={<MedicationSafetyPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
           <Route path="/emergency" element={<EmergencyContactPage />} />
         </Route>
       </Route>

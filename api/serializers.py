@@ -5,9 +5,12 @@ from .services.session_resume import build_session_resume_payload
 
 
 def symptom_session_summary(session: SymptomSession) -> str:
-    """Short text for history cards: prefer pre-visit report, then first user message, then last assistant reply."""
+    """Short text for history cards: prefer chief complaint / patient-stated summary, then transcript."""
     report = session.pre_visit_report
     if isinstance(report, dict):
+        chief = report.get("chief_complaint")
+        if isinstance(chief, str) and chief.strip():
+            return chief.strip()
         patient_summary = report.get("patient_summary")
         if isinstance(patient_summary, str) and patient_summary.strip():
             return patient_summary.strip()
@@ -57,7 +60,7 @@ class SymptomSessionSerializer(serializers.ModelSerializer):
 
 class SymptomSessionListSerializer(serializers.ModelSerializer):
     """
-    Dashboard/history list: stable public id, triage, time, and a human-readable summary.
+    Dashboard/history list: stable public id, triage, time, summary, and optional pre-visit JSON.
     """
 
     session_id = serializers.UUIDField(source="public_id", read_only=True)
@@ -65,7 +68,7 @@ class SymptomSessionListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = SymptomSession
-        fields = ["session_id", "triage_level", "created_at", "summary"]
+        fields = ["session_id", "triage_level", "created_at", "summary", "pre_visit_report"]
 
     def get_summary(self, obj: SymptomSession) -> str:
         return symptom_session_summary(obj)
