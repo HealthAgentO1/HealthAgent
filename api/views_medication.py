@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 from .models import MedicationProfile
 from .serializers import MedicationProfileExtractResponseSerializer
 from .services.medication_extraction import MedicationLlmError, extract_medications_with_rxnorm
+from .services.openfda_interactions import compute_pairwise_interactions
 
 
 class MedicationProfileExtractView(APIView):
@@ -52,10 +53,24 @@ class MedicationProfileExtractView(APIView):
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
+        interaction_results = None
+        if len(extracted) >= 2:
+            try:
+                interaction_results = compute_pairwise_interactions(extracted)
+            except Exception as exc:
+                interaction_results = {
+                    "source": "openfda_drug_label",
+                    "error": str(exc),
+                    "pairwise": [],
+                    "per_drug_notes": [],
+                    "pairs_checked": 0,
+                }
+
         profile = MedicationProfile.objects.create(
             user=request.user,
             medications_raw=raw,
             extracted_medications=extracted,
+            interaction_results=interaction_results,
         )
 
         data = MedicationProfileExtractResponseSerializer(profile).data
