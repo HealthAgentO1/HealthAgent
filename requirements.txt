@@ -7,3 +7,4 @@ python-dotenv==1.2.1
 openai==1.59.8
 anthropic==0.42.0
 tiktoken==0.8.0
+requests==2.31.0

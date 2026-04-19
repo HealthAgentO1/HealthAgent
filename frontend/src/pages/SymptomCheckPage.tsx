@@ -6,7 +6,11 @@
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
  */
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { fetchSymptomSessionResume } from "../api/queries";
+import { LinearLoadingBar, useSimulatedProgress } from "../components/LinearLoadingBar";
 import type { FollowUpAnswer, FollowUpQuestion, SymptomResultsPayload } from "../symptomCheck/types";
 import { validateUserAddress, type UserAddress } from "../symptomCheck/addressValidation";
 import {
@@ -14,17 +18,25 @@ import {
   requestNearbyFacilities,
   type NearbyFacility,
 } from "../symptomCheck/nppesFacilitiesClient";
+import { parseJsonObjectFromLlm } from "../symptomCheck/parseLlmJson";
 import { US_STATE_OPTIONS, type UsStateCode } from "../symptomCheck/usStates";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
+  type StructuredFollowUpAnswer,
 } from "../symptomCheck/symptomLlmClient";
+import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
+import {
+  validateFollowUpQuestionsPayload,
+  validateSymptomResultsPayload,
+} from "../symptomCheck/validatePayloads";
 import {
   SYMPTOM_CHECK_SESSION_VERSION,
   clearSymptomCheckSession,
   isRecoverableSymptomCheckSession,
   readSymptomCheckSession,
   writeSymptomCheckSession,
+  type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from "../symptomCheck/symptomCheckSession";
 
@@ -72,6 +84,20 @@ function facilityListingFitLabel(score: number): string {
   return "Weaker directory signals — confirm before visiting";
 }
 
+/** Map insurer label from LLM payloads / resume API back to a known option id when possible. */
+function insuranceIdFromLabel(label: string): InsuranceId | "" {
+  const t = label.trim().toLowerCase();
+  if (!t) return "";
+  for (const o of INSURANCE_OPTIONS) {
+    if (o.label.toLowerCase() === t) return o.id;
+  }
+  for (const o of INSURANCE_OPTIONS) {
+    const ol = o.label.toLowerCase();
+    if (t.includes(ol) || ol.includes(t)) return o.id;
+  }
+  return "";
+}
+
 /** Default control values so required validation and sliders start in a defined state. */
 function buildInitialAnswers(questions: FollowUpQuestion[]): Record<string, FollowUpAnswer> {
   const out: Record<string, FollowUpAnswer> = {};
@@ -117,12 +143,14 @@ function severityStyles(level: string): string {
     return "bg-error-container/40 text-on-error-container border border-error-container/50";
   }
   if (level === "moderate") {
-    return "bg-tertiary-container/50 text-on-tertiary-container border border-tertiary-container/40";
+    return "bg-orange-200 text-orange-800 border border-orange-300";
   }
-  return "bg-primary-fixed/15 text-primary border border-primary-fixed-dim/40";
+  return "bg-teal-200 text-teal-800 border border-teal-300";
 }
 
 const SymptomCheckPage: React.FC = () => {
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<FlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
@@ -139,14 +167,39 @@ const SymptomCheckPage: React.FC = () => {
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
-  // Serializes Continue / See results while `requestFollowUpQuestions` or `requestConditionAssessment` runs.
-  const [pendingRequest, setPendingRequest] = useState<null | "followup" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
-  /** Step 3: NPPES-backed facilities (sorted nearest-first on the server). */
+  /** Step 3: NPPES-backed facilities (relevance + distance on the server). */
   const [nearbyFacilities, setNearbyFacilities] = useState<NearbyFacility[] | null>(null);
   const [nearbyLoading, setNearbyLoading] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [nearbyTaxonomyUsed, setNearbyTaxonomyUsed] = useState<string | null>(null);
+  /** Fades results content in after the LLM response lands. */
+  const [resultsEntered, setResultsEntered] = useState(false);
+  /** Tracks in-flight LLM phases for UI disable + session resume (see `symptomCheckSession`). */
+  const [pendingRequest, setPendingRequest] = useState<SymptomCheckPendingRequest>(null);
+  /** Django `SymptomSession.public_id` after follow-up questions; sent with condition assessment. */
+  const [surveyBackendSessionId, setSurveyBackendSessionId] = useState<string | null>(null);
+  const [urlSessionHydrating, setUrlSessionHydrating] = useState(false);
+  const [resumeChatNotice, setResumeChatNotice] = useState(false);
+
+  const followUpMutation = useMutation({
+    mutationFn: (vars: { symptoms: string; insuranceLabel: string }): Promise<FollowUpQuestionsWithSession> =>
+      requestFollowUpQuestions(vars),
+  });
+
+  const resultsMutation = useMutation({
+    mutationFn: (vars: {
+      symptoms: string;
+      insuranceLabel: string;
+      followUpAnswers: StructuredFollowUpAnswer[];
+      sessionId: string;
+    }) => requestConditionAssessment(vars),
+  });
+
+  const followUpLoading = followUpMutation.isPending;
+  const resultsLoading = resultsMutation.isPending;
+  const followUpProgress = useSimulatedProgress(followUpLoading);
+  const resultsProgress = useSimulatedProgress(resultsLoading);
 
   /**
    * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
@@ -154,12 +207,104 @@ const SymptomCheckPage: React.FC = () => {
    */
   const [sessionGate, setSessionGate] = useState<"need-choice" | "ready">(() => {
     if (typeof window === "undefined") return "ready";
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("session")?.trim()) return "ready";
     const snap = readSymptomCheckSession();
     if (snap && isRecoverableSymptomCheckSession(snap)) return "need-choice";
     return "ready";
   });
 
   const addressValidation = useMemo(() => validateUserAddress(userAddress), [userAddress]);
+
+  /** Deep link from dashboard: `?session=<uuid>` loads server state and skips the local resume modal. */
+  useEffect(() => {
+    const sid = searchParams.get("session")?.trim();
+    if (!sid) return;
+
+    let cancelled = false;
+    setSessionGate("ready");
+    setUrlSessionHydrating(true);
+    setLlmError(null);
+    setResumeChatNotice(false);
+
+    void (async () => {
+      try {
+        clearSymptomCheckSession();
+        const data = await fetchSymptomSessionResume(sid);
+        if (cancelled) return;
+
+        setSurveyBackendSessionId(sid);
+        setSymptoms(data.symptoms ?? "");
+        setInsurance(insuranceIdFromLabel(data.insurance_label ?? ""));
+        setPendingRequest(null);
+        setResultsEntered(false);
+
+        if (data.resume_step === "followup" && data.followup_raw_text) {
+          try {
+            const parsed = parseJsonObjectFromLlm(data.followup_raw_text);
+            const { questions } = validateFollowUpQuestionsPayload(parsed);
+            setFollowUpQuestions(questions);
+            setFollowUpAnswers(buildInitialAnswers(questions));
+            setResults(null);
+            setStep("followup");
+          } catch {
+            setLlmError("Could not restore follow-up questions from this session.");
+            setStep("intake");
+            setFollowUpQuestions([]);
+            setFollowUpAnswers({});
+          }
+        } else if (data.resume_step === "results" && data.results_raw_text) {
+          try {
+            const parsed = parseJsonObjectFromLlm(data.results_raw_text);
+            const resPayload = validateSymptomResultsPayload(parsed);
+            setFollowUpQuestions([]);
+            setFollowUpAnswers({});
+            setResults(resPayload);
+            setStep("results");
+          } catch {
+            setLlmError("Could not restore results from this session.");
+            setStep("intake");
+          }
+        } else if (data.resume_step === "chat") {
+          setFollowUpQuestions([]);
+          setFollowUpAnswers({});
+          setResults(null);
+          setStep("intake");
+          setResumeChatNotice(true);
+        } else {
+          setFollowUpQuestions([]);
+          setFollowUpAnswers({});
+          setResults(null);
+          setStep("intake");
+        }
+
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.delete("session");
+            return next;
+          },
+          { replace: true },
+        );
+      } catch (e) {
+        if (!cancelled) {
+          setLlmError(
+            e instanceof Error
+              ? e.message
+              : "Unable to load this session. Try again from the dashboard.",
+          );
+          setStep("intake");
+        }
+      } finally {
+        if (!cancelled) setUrlSessionHydrating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams, setSearchParams]);
+
   const intakeValid =
     symptoms.trim().length > 0 && insurance !== "" && addressValidation.valid;
 
@@ -175,10 +320,11 @@ const SymptomCheckPage: React.FC = () => {
     setLlmError(null);
     setPendingRequest("followup");
     try {
-      const data = await requestFollowUpQuestions({
+      const data = await followUpMutation.mutateAsync({
         symptoms: input.symptoms,
         insuranceLabel: input.insuranceLabel,
       });
+      setSurveyBackendSessionId(data.session_id);
       setFollowUpQuestions(data.questions);
       setFollowUpAnswers(buildInitialAnswers(data.questions));
       setResults(null);
@@ -196,9 +342,16 @@ const SymptomCheckPage: React.FC = () => {
     insuranceLabel: string;
     questions: FollowUpQuestion[];
     answers: Record<string, FollowUpAnswer>;
+    backendSessionId: string | null;
   }) => {
     if (!followUpAnswersSatisfy(input.questions, input.answers)) {
       setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      return;
+    }
+    if (!input.backendSessionId) {
+      setLlmError(
+        "This session is missing server data. Please start a new symptom check from the beginning.",
+      );
       return;
     }
     setLlmError(null);
@@ -211,13 +364,15 @@ const SymptomCheckPage: React.FC = () => {
         value: input.answers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
       }));
 
-      const payload = await requestConditionAssessment({
+      const payload = await resultsMutation.mutateAsync({
         symptoms: input.symptoms,
         insuranceLabel: input.insuranceLabel,
         followUpAnswers: structured,
+        sessionId: input.backendSessionId,
       });
       setResults(payload);
       setStep("results");
+      void queryClient.invalidateQueries({ queryKey: ["symptom-sessions"] });
     } catch (err) {
       setLlmError(err instanceof Error ? err.message : "Unable to load assessment results.");
     } finally {
@@ -242,6 +397,7 @@ const SymptomCheckPage: React.FC = () => {
       insuranceLabel: insurerLabel,
       questions: followUpQuestions,
       answers: followUpAnswers,
+      backendSessionId: surveyBackendSessionId,
     });
   };
 
@@ -266,6 +422,7 @@ const SymptomCheckPage: React.FC = () => {
       results,
       pendingRequest,
       llmError,
+      surveyBackendSessionId,
     };
     writeSymptomCheckSession(snapshot);
   }, [
@@ -279,6 +436,7 @@ const SymptomCheckPage: React.FC = () => {
     results,
     pendingRequest,
     llmError,
+    surveyBackendSessionId,
   ]);
 
   /** After the LLM returns `care_taxonomy`, ask Django to rank NPPES facilities by road distance (via geocoding). */
@@ -359,6 +517,7 @@ const SymptomCheckPage: React.FC = () => {
     setFollowUpAnswers(snap.followUpAnswers);
     setResults(snap.results);
     setLlmError(snap.llmError);
+    setSurveyBackendSessionId(snap.surveyBackendSessionId);
     setPendingRequest(null);
   };
 
@@ -387,6 +546,7 @@ const SymptomCheckPage: React.FC = () => {
         insuranceLabel: label,
         questions: snap.followUpQuestions,
         answers: snap.followUpAnswers,
+        backendSessionId: snap.surveyBackendSessionId,
       });
     }
   };
@@ -403,11 +563,15 @@ const SymptomCheckPage: React.FC = () => {
     setResults(null);
     setLlmError(null);
     setPendingRequest(null);
+    setSurveyBackendSessionId(null);
+    setResumeChatNotice(false);
     setSessionGate("ready");
   };
 
   const restart = () => {
     clearSymptomCheckSession();
+    followUpMutation.reset();
+    resultsMutation.reset();
     setStep("intake");
     setSymptoms("");
     setInsurance("");
@@ -418,7 +582,20 @@ const SymptomCheckPage: React.FC = () => {
     setResults(null);
     setLlmError(null);
     setPendingRequest(null);
+    setSurveyBackendSessionId(null);
+    setResumeChatNotice(false);
+    setResultsEntered(false);
   };
+
+  useEffect(() => {
+    if (!results) {
+      setResultsEntered(false);
+      return;
+    }
+    setResultsEntered(false);
+    const t = window.setTimeout(() => setResultsEntered(true), 40);
+    return () => clearTimeout(t);
+  }, [results]);
 
   const stepIndex = step === "intake" ? 1 : step === "followup" ? 2 : 3;
 
@@ -456,7 +633,7 @@ const SymptomCheckPage: React.FC = () => {
 
     if (q.input_type === "single_choice" && q.options) {
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -500,7 +677,7 @@ const SymptomCheckPage: React.FC = () => {
     if (q.input_type === "multi_choice" && q.options) {
       const selected = Array.isArray(value) ? value : [];
       return (
-        <fieldset className="border-0 p-0 m-0" key={q.id}>
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
           <legend className="text-sm font-semibold text-on-surface mb-3 block">
             {q.prompt}
             {q.required ? (
@@ -620,6 +797,19 @@ const SymptomCheckPage: React.FC = () => {
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12 pb-16">
       <div className="max-w-6xl mx-auto relative">
+        {urlSessionHydrating ? (
+          <div
+            aria-busy="true"
+            aria-live="polite"
+            className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/45 p-6"
+          >
+            <div className="h-10 w-10 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+            <p className="font-body text-sm font-medium text-on-primary">
+              Opening your saved session…
+            </p>
+          </div>
+        ) : null}
+
         {sessionGate === "need-choice" ? (
           <div
             aria-labelledby="symptom-session-resume-title"
@@ -684,8 +874,34 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         </header>
 
+        {resumeChatNotice && step === "intake" ? (
+          <div
+            className="mb-8 rounded-xl border border-primary/30 bg-primary-fixed/10 px-4 py-4 md:px-6 md:py-5 flex flex-col sm:flex-row sm:items-center gap-4"
+            role="status"
+          >
+            <div className="flex-1 min-w-0">
+              <p className="font-headline text-sm font-bold text-primary mb-1">Conversational session</p>
+              <p className="font-body text-sm text-on-surface-variant">
+                This entry was created with the live chat interview, not the structured Symptom Check
+                questionnaire. You can start a new guided check below whenever you are ready.
+              </p>
+            </div>
+            <button
+              className="shrink-0 font-headline text-sm font-semibold text-primary border border-primary/40 rounded-lg px-4 py-2 hover:bg-primary/5 transition-colors"
+              type="button"
+              onClick={() => setResumeChatNotice(false)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
         {step === "intake" && (
-          <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden">
+          <section
+            className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost relative overflow-hidden transition-opacity duration-300 ease-out ${
+              followUpLoading ? "opacity-60 pointer-events-none" : "opacity-100"
+            }`}
+          >
             <div className="absolute -top-12 -right-12 w-40 h-40 bg-primary/5 rounded-full blur-2xl pointer-events-none" />
             <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
               <span className="material-symbols-outlined text-secondary">edit_note</span>
@@ -919,14 +1135,30 @@ const SymptomCheckPage: React.FC = () => {
                 </p>
               ) : null}
 
+              {followUpLoading ? (
+                <div
+                  className="mt-8 pt-6 border-t border-outline-variant/15 space-y-3 transition-opacity duration-300 ease-out"
+                  aria-live="polite"
+                >
+                  <p className="text-sm font-semibold text-primary font-headline">
+                    Generating follow-up questions…
+                  </p>
+                  <LinearLoadingBar
+                    estimatedSeconds={30}
+                    label="Generating follow-up questions"
+                    progress={followUpProgress}
+                  />
+                </div>
+              ) : null}
+
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 pt-2">
                 <button
                   className="gradient-primary text-on-primary px-8 py-3 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none"
-                  disabled={!intakeValid || pendingRequest !== null}
+                  disabled={!intakeValid || followUpLoading}
                   type="button"
                   onClick={() => void handleContinueToFollowUp()}
                 >
-                  {pendingRequest === "followup" ? "Preparing questions…" : "Continue"}
+                  {followUpLoading ? "Preparing questions…" : "Continue"}
                   <span className="material-symbols-outlined text-lg">arrow_forward</span>
                 </button>
                 {!intakeValid && (
@@ -941,7 +1173,11 @@ const SymptomCheckPage: React.FC = () => {
 
         {step === "followup" && (
           <div className="space-y-6">
-            <div className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3">
+            <div
+              className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
+                resultsLoading ? "opacity-40" : "opacity-100"
+              }`}
+            >
               <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
               <div>
                 <h3 className="text-sm font-bold text-primary mb-1 font-headline">Follow-up questions</h3>
@@ -953,51 +1189,79 @@ const SymptomCheckPage: React.FC = () => {
               </div>
             </div>
 
-            <section className="bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost">
-              <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
-                <span className="material-symbols-outlined text-secondary">quiz</span>
-                Short questionnaire
-              </h2>
+            <div className="relative">
+              <section
+                className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
+                  resultsLoading ? "opacity-35 pointer-events-none" : "opacity-100"
+                }`}
+              >
+                <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">quiz</span>
+                  Short questionnaire
+                </h2>
 
-              <div className="space-y-10">
-                {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
-              </div>
+                <div className="space-y-10">
+                  {followUpQuestions.map((question) => renderFollowUpQuestion(question))}
+                </div>
 
-              {llmError ? (
-                <p className="mt-8 text-sm text-error font-body" role="alert">
-                  {llmError}
-                </p>
+                {llmError ? (
+                  <p className="mt-8 text-sm text-error font-body" role="alert">
+                    {llmError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
+                  <button
+                    className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    type="button"
+                    onClick={() => {
+                      setStep("intake");
+                      setFollowUpQuestions([]);
+                      setFollowUpAnswers({});
+                      setLlmError(null);
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
+                    disabled={!followUpValid || resultsLoading}
+                    type="button"
+                    onClick={() => void handleSeeResults()}
+                  >
+                    {resultsLoading ? "Analyzing responses…" : "See results"}
+                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                  </button>
+                </div>
+              </section>
+
+              {resultsLoading ? (
+                <div
+                  className="absolute inset-0 z-10 flex items-start justify-center rounded-xl bg-surface-container-lowest/92 backdrop-blur-[2px] border border-outline-variant/20 p-5 md:p-8 shadow-ambient transition-opacity duration-300 ease-out"
+                  aria-live="polite"
+                >
+                  <div className="w-full max-w-3xl space-y-3">
+                    <p className="text-sm font-semibold text-primary font-headline">
+                      Analyzing your responses…
+                    </p>
+                    <LinearLoadingBar
+                      estimatedSeconds={30}
+                      label="Analyzing your responses"
+                      progress={resultsProgress}
+                    />
+                  </div>
+                </div>
               ) : null}
-
-              <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
-                <button
-                  className="px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
-                  type="button"
-                  onClick={() => {
-                    setStep("intake");
-                    setFollowUpQuestions([]);
-                    setFollowUpAnswers({});
-                    setLlmError(null);
-                  }}
-                >
-                  Back
-                </button>
-                <button
-                  className="gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none sm:ml-auto"
-                  disabled={!followUpValid || pendingRequest !== null}
-                  type="button"
-                  onClick={() => void handleSeeResults()}
-                >
-                  {pendingRequest === "results" ? "Analyzing responses…" : "See results"}
-                  <span className="material-symbols-outlined text-lg">monitoring</span>
-                </button>
-              </div>
-            </section>
+            </div>
           </div>
         )}
 
         {step === "results" && results && (
-          <div className="space-y-8">
+          <div
+            className={`space-y-8 transition-opacity duration-500 ease-out ${
+              resultsEntered ? "opacity-100" : "opacity-0"
+            }`}
+          >
             <div className="bg-error-container/40 border border-error-container/50 rounded-xl p-5 flex gap-3 items-start">
               <span
                 className="material-symbols-outlined text-on-error-container shrink-0"
