@@ -5,6 +5,7 @@ import { useAuth } from "../context/AuthContext";
 const navItems = [
   { to: "/", icon: "dashboard", label: "Dashboard" },
   { to: "/symptom-check", icon: "medical_services", label: "Symptom Check" },
+  { to: "/prior-diagnoses", icon: "clinical_notes", label: "My prior diagnoses" },
   {
     to: "/medication-safety",
     icon: "pill",

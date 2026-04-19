@@ -60,6 +60,28 @@ class SymptomSession(models.Model):
         return f"SymptomSession({self.pk}) for {self.user_id}"
 
 
+class ManualPriorDiagnosis(models.Model):
+    """
+    Patient-entered diagnosis labels for optional Symptom Check context (`prior_official_diagnoses`),
+    independent of a specific symptom session's post-visit diagnosis.
+    """
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="manual_prior_diagnoses",
+    )
+    text = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at", "-pk")
+
+    def __str__(self) -> str:
+        return f"ManualPriorDiagnosis({self.public_id}) for {self.user_id}"
+
+
 class InsurerNetworkNpi(models.Model):
     """
     Offline-ingested US payer transparency (CMS TIC) projection: organizational NPIs

@@ -65,8 +65,8 @@ export type SymptomCheckSessionSnapshot = {
   /** Step 1: user opted in to sending past official diagnoses to the first LLM call. */
   includePriorDiagnosesInLlm: boolean;
   /**
-   * Deduped labels saved when sessions were loaded (for resume replay of `followup` request).
-   * Mirrors `uniquePriorOfficialDiagnoses` at last persist.
+   * Deduped labels saved when session + manual lists were loaded (for resume replay of `followup` request).
+   * Mirrors `mergedPriorOfficialDiagnosisLabels` at last persist.
    */
   priorOfficialDiagnosesSnapshot: string[];
 };

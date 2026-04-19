@@ -5,12 +5,13 @@
  *
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
  * after refresh or navigation; in-flight LLM phases are re-requested on "Resume". Step 1 can
- * optionally attach past **`post_visit_diagnosis`** labels to the first LLM call (`prior_official_diagnoses`).
+ * optionally attach past diagnosis labels (post-visit session records and **My prior diagnoses**)
+ * to the first LLM call (`prior_official_diagnoses`).
  * Optional account default address (`GET/PATCH /auth/me/` `default_address`) prefills step 1 when empty.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { isAxiosError } from 'axios';
 import {
   defaultAddressToUserAddress,
@@ -18,6 +19,11 @@ import {
   updateUserProfile,
   userAddressToDefaultPayload,
 } from '../api/profile';
+import {
+  manualPriorDiagnosesQueryKey,
+  useManualPriorDiagnoses,
+  type ManualPriorDiagnosisItem,
+} from '../api/manualPriorDiagnoses';
 import {
   fetchSymptomSessionResume,
   useSymptomSessions,
@@ -80,7 +86,7 @@ import {
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from '../symptomCheck/symptomCheckSession';
-import { uniquePriorOfficialDiagnoses } from '../symptomCheck/priorOfficialDiagnoses';
+import { mergedPriorOfficialDiagnosisLabels } from '../symptomCheck/priorOfficialDiagnoses';
 import { PostVisitDiagnosisSection } from '../symptomCheck/PostVisitDiagnosisSection';
 import {
   markPostVisitDiagnosisEligible,
@@ -278,11 +284,18 @@ const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { isAuthenticated } = useAuth();
-  /** Past checks with `post_visit_diagnosis` — used for optional first-LLM context on step 1. */
+  /** Past checks with `post_visit_diagnosis` plus manual list — optional first-LLM context on step 1. */
   const { data: symptomSessionsList } = useSymptomSessions({ enabled: isAuthenticated });
+  const { data: manualPriorDiagnosesList } = useManualPriorDiagnoses({
+    enabled: isAuthenticated,
+  });
   const priorOfficialDiagnosisLabels = useMemo(
-    () => uniquePriorOfficialDiagnoses(symptomSessionsList ?? []),
-    [symptomSessionsList],
+    () =>
+      mergedPriorOfficialDiagnosisLabels(
+        symptomSessionsList ?? [],
+        manualPriorDiagnosesList ?? [],
+      ),
+    [symptomSessionsList, manualPriorDiagnosesList],
   );
   const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<SymptomCheckFlowStep>('intake');
@@ -347,7 +360,7 @@ const SymptomCheckPage: React.FC = () => {
   const [postVisitDiagnosis, setPostVisitDiagnosis] = useState<PostVisitDiagnosis | null>(null);
   const [urlSessionHydrating, setUrlSessionHydrating] = useState(false);
   const [resumeChatNotice, setResumeChatNotice] = useState(false);
-  /** When true, first survey LLM call receives `prior_official_diagnoses` from past post-visit records. */
+  /** When true, first survey LLM call receives `prior_official_diagnoses` from saved labels (post-visit + My prior diagnoses). */
   const [includePriorDiagnosesInLlm, setIncludePriorDiagnosesInLlm] = useState(false);
   const [priorDiagnosesInfoOpen, setPriorDiagnosesInfoOpen] = useState(false);
 
@@ -1071,8 +1084,16 @@ const SymptomCheckPage: React.FC = () => {
 
     if (snap.pendingRequest === 'followup') {
       if (trimmed.length === 0 || !ins) return;
-      const cached = queryClient.getQueryData<SymptomSessionListItem[]>(['symptom-sessions']);
-      const freshLabels = uniquePriorOfficialDiagnoses(cached ?? []);
+      const cachedSessions = queryClient.getQueryData<SymptomSessionListItem[]>([
+        'symptom-sessions',
+      ]);
+      const cachedManual = queryClient.getQueryData<ManualPriorDiagnosisItem[]>(
+        manualPriorDiagnosesQueryKey,
+      );
+      const freshLabels = mergedPriorOfficialDiagnosisLabels(
+        cachedSessions ?? [],
+        cachedManual ?? [],
+      );
       const priorList =
         snap.includePriorDiagnosesInLlm
           ? snap.priorOfficialDiagnosesSnapshot.length > 0
@@ -1691,10 +1712,11 @@ const SymptomCheckPage: React.FC = () => {
               </h2>
               <div className="space-y-3 font-body text-sm leading-relaxed text-on-surface-variant">
                 <p>
-                  After you complete a symptom check and later record your clinician&apos;s official
-                  diagnosis (Post-visit Diagnosis), that label is stored on your account with that
-                  check—not the AI&apos;s illustrative list, but what you entered as the real
-                  diagnosis after a visit.
+                  Labels can come from two places: diagnoses you add on{" "}
+                  <strong className="text-on-surface">My prior diagnoses</strong>, and official
+                  diagnoses you recorded after a visit on a past check (Post-visit Diagnosis)—not
+                  the AI&apos;s illustrative list from that check, but what you entered as the real
+                  diagnosis after seeing a clinician.
                 </p>
                 <p>
                   If you turn this option on, those saved labels are sent to the{" "}
@@ -1707,7 +1729,7 @@ const SymptomCheckPage: React.FC = () => {
                 <p>
                   This does not replace your medical record, and you can leave the box unchecked to
                   run a check without sharing those past labels. You must be signed in and have at
-                  least one saved post-visit diagnosis for the option to be available.
+                  least one saved label (from either source) for the option to be available.
                 </p>
               </div>
               <button
@@ -1939,11 +1961,23 @@ const SymptomCheckPage: React.FC = () => {
                       </button>
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-on-surface-variant font-body">
-                      {!isAuthenticated
-                        ? "Sign in to use diagnoses you have saved after past visits (Post-visit Diagnosis on completed checks)."
-                        : priorOfficialDiagnosisLabels.length === 0
-                          ? "When you record an official diagnosis after a visit on a past check, you can include those labels here."
-                          : "The first AI step will receive your current symptoms plus these recorded diagnoses as background context."}
+                      {!isAuthenticated ? (
+                        "Sign in to use diagnoses you have saved on your account (My prior diagnoses or Post-visit Diagnosis on completed checks)."
+                      ) : priorOfficialDiagnosisLabels.length === 0 ? (
+                        <>
+                          Add labels on{" "}
+                          <Link
+                            to="/prior-diagnoses"
+                            className="font-semibold text-primary underline-offset-2 hover:underline"
+                          >
+                            My prior diagnoses
+                          </Link>{" "}
+                          or record an official diagnosis after a visit on a completed check to
+                          enable this option.
+                        </>
+                      ) : (
+                        "The first AI step will receive your current symptoms plus these recorded diagnoses as background context."
+                      )}
                     </p>
                   </div>
                 </div>

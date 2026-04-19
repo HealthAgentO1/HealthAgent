@@ -21,3 +21,33 @@ export function uniquePriorOfficialDiagnoses(sessions: SymptomSessionListItem[])
   }
   return out;
 }
+
+/** Anything with a `text` field (e.g. `GET /api/prior-diagnoses/` rows). */
+export type PriorDiagnosisTextRow = { text: string };
+
+/**
+ * Deduplicated labels for Symptom Check step 1: manual entries from `GET /api/prior-diagnoses/`
+ * first (newest-first list order), then unique post-visit labels from session history.
+ */
+export function mergedPriorOfficialDiagnosisLabels(
+  sessions: SymptomSessionListItem[],
+  manual: readonly PriorDiagnosisTextRow[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (raw: string) => {
+    const t = raw.trim();
+    if (!t) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(t);
+  };
+  for (const m of manual) {
+    push(m.text);
+  }
+  for (const label of uniquePriorOfficialDiagnoses(sessions)) {
+    push(label);
+  }
+  return out;
+}

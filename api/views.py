@@ -5,15 +5,60 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from .models import ExampleItem, SymptomSession
+from .models import ExampleItem, ManualPriorDiagnosis, SymptomSession
 from .serializers import (
     ExampleItemSerializer,
+    ManualPriorDiagnosisCreateSerializer,
+    ManualPriorDiagnosisSerializer,
     SymptomSessionListSerializer,
     SymptomSessionPostVisitDiagnosisSerializer,
     SymptomSessionResumeSerializer,
     SymptomSessionSerializer,
 )
 from .services.session_resume import build_session_resume_payload
+
+class UserManualPriorDiagnosisListCreateView(generics.ListCreateAPIView):
+    """
+    GET /api/prior-diagnoses/ — list patient-entered prior diagnosis labels.
+    POST /api/prior-diagnoses/ — add one label (used with post-visit labels for optional LLM context).
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return ManualPriorDiagnosis.objects.filter(user=self.request.user).order_by(
+            "-created_at", "-pk"
+        )
+
+    def get_serializer_class(self):
+        if self.request.method == "POST":
+            return ManualPriorDiagnosisCreateSerializer
+        return ManualPriorDiagnosisSerializer
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        read = ManualPriorDiagnosisSerializer(
+            serializer.instance, context=self.get_serializer_context()
+        )
+        headers = self.get_success_headers(read.data)
+        return Response(read.data, status=status.HTTP_201_CREATED, headers=headers)
+
+
+class UserManualPriorDiagnosisDestroyView(generics.DestroyAPIView):
+    """DELETE /api/prior-diagnoses/<uuid>/ — remove one manual prior diagnosis row."""
+
+    permission_classes = [IsAuthenticated]
+    lookup_field = "public_id"
+    lookup_url_kwarg = "diagnosis_public_id"
+
+    def get_queryset(self):
+        return ManualPriorDiagnosis.objects.filter(user=self.request.user)
+
 
 class UserSymptomSessionsListView(generics.ListAPIView):
     """

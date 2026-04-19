@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ExampleItem, MedicationProfile, SymptomSession
+from .models import ExampleItem, ManualPriorDiagnosis, MedicationProfile, SymptomSession
 from .services.session_resume import build_session_resume_payload
 
 
@@ -39,6 +39,28 @@ class ExampleItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = ExampleItem
         fields = '__all__'
+
+
+class ManualPriorDiagnosisSerializer(serializers.ModelSerializer):
+    diagnosis_id = serializers.UUIDField(source="public_id", read_only=True)
+
+    class Meta:
+        model = ManualPriorDiagnosis
+        fields = ("diagnosis_id", "text", "created_at")
+
+
+class ManualPriorDiagnosisCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ManualPriorDiagnosis
+        fields = ("text",)
+
+    def validate_text(self, value: str) -> str:
+        t = value.strip()
+        if not t:
+            raise serializers.ValidationError("Enter a diagnosis label.")
+        if len(t) > 500:
+            raise serializers.ValidationError("Keep the label at or under 500 characters.")
+        return t
 
 
 class SymptomSessionSerializer(serializers.ModelSerializer):

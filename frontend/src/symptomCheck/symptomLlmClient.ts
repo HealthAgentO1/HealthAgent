@@ -118,7 +118,7 @@ export async function requestFollowUpQuestions(input: {
   insuranceLabel: string;
   practiceLocation?: PracticeLocationPayload | null;
   /**
-   * Optional: official diagnoses the user recorded after past visits (`SymptomSession.post_visit_diagnosis`).
+   * Optional: prior diagnosis labels (post-visit records on past sessions and/or **My prior diagnoses**).
    * Only sent when the user opts in on step 1 so the model can weigh chronic / historical context.
    */
   priorOfficialDiagnoses?: string[];

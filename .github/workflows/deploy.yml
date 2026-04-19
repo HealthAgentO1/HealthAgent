@@ -90,8 +90,9 @@ jobs:
             --command python \
             --args manage.py,migrate \
             --region ${{ env.REGION }} \
-            --set-env-vars DJANGO_DEBUG=False,POSTGRES_DB=myprojectdb,POSTGRES_USER=myprojectuser,POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
+            --set-env-vars DJANGO_DEBUG=False,POSTGRES_DB=myprojectdb,POSTGRES_USER=myprojectuser,POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db,DJANGO_SECRET_KEY=${{ secrets.DJANGO_SECRET_KEY }},DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }},OPENFDA_API_KEY=${{ secrets.OPENFDA_API_KEY }} \
             --set-secrets POSTGRES_PASSWORD=DB_PASSWORD:latest \
             --set-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
+            --task-timeout=300s \
             --execute-now --wait
           gcloud run jobs delete migrate-job-${{ github.sha }} --region ${{ env.REGION }} --quiet

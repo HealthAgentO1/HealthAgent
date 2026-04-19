@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import ExampleItem, MedicationProfile, SymptomSession
+from .models import ExampleItem, ManualPriorDiagnosis, MedicationProfile, SymptomSession
 
 
 @admin.register(ExampleItem)
@@ -8,6 +8,13 @@ class ExampleItemAdmin(admin.ModelAdmin):
     list_display = ("name", "is_active", "created_at")
     search_fields = ("name", "description")
     list_filter = ("is_active", "created_at")
+
+
+@admin.register(ManualPriorDiagnosis)
+class ManualPriorDiagnosisAdmin(admin.ModelAdmin):
+    list_display = ("public_id", "user", "text", "created_at")
+    search_fields = ("user__email", "text", "public_id")
+    raw_id_fields = ("user",)
 
 
 @admin.register(SymptomSession)

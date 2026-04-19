@@ -8,6 +8,7 @@ import MedicationSafetyPage from "./pages/MedicationSafetyPage";
 import MedicationSafetyDetailPage from "./pages/MedicationSafetyDetailPage";
 import ReportsPage from "./pages/ReportsPage";
 import EmergencyContactPage from "./pages/EmergencyContactPage";
+import PriorDiagnosesPage from "./pages/PriorDiagnosesPage";
 import SettingsProfilePage from "./pages/SettingsProfilePage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
@@ -26,6 +27,7 @@ function App() {
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/symptom-check" element={<SymptomCheckPage />} />
+          <Route path="/prior-diagnoses" element={<PriorDiagnosesPage />} />
           <Route path="/medication-safety" element={<MedicationSafetyPage />} />
           <Route path="/medication-safety/med/:medicationId" element={<MedicationSafetyDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />

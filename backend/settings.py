@@ -117,8 +117,10 @@ DATABASES = {
 
 # If running on Google Cloud Run, use the Cloud SQL Unix socket
 if os.environ.get("POSTGRES_HOST", "").startswith("/cloudsql/"):
+    # For Unix sockets, 'HOST' must be the directory containing the socket file.
+    # The default Cloud Run mount point is /cloudsql/INSTANCE_CONNECTION_NAME
     DATABASES["default"]["HOST"] = os.environ.get("POSTGRES_HOST")
-    # For Unix sockets, PORT might not be used, but Django DB engine sometimes wants it empty or omitted
+    # For Unix sockets, PORT should be empty or omitted.
     DATABASES["default"]["PORT"] = ""
 
 # Tests use SQLite so `manage.py test` does not require a running Postgres instance.

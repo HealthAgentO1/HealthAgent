@@ -9,6 +9,8 @@ from .views import (
     MedicationRecallsView,
     ProvidersView,
     SymptomSessionViewSet,
+    UserManualPriorDiagnosisDestroyView,
+    UserManualPriorDiagnosisListCreateView,
     UserSymptomSessionRetrieveUpdateDestroyView,
     UserSymptomSessionsListView,
 )
@@ -50,6 +52,16 @@ urlpatterns = [
         name="symptom-session-detail",
     ),
     path("sessions/", UserSymptomSessionsListView.as_view(), name="symptom-sessions-list"),
+    path(
+        "prior-diagnoses/",
+        UserManualPriorDiagnosisListCreateView.as_view(),
+        name="manual-prior-diagnoses-list",
+    ),
+    path(
+        "prior-diagnoses/<uuid:diagnosis_public_id>/",
+        UserManualPriorDiagnosisDestroyView.as_view(),
+        name="manual-prior-diagnosis-detail",
+    ),
     path("symptom/chat/", SymptomChatView.as_view(), name="symptom-chat"),
     # Symptom Check SPA: two-phase JSON LLM (follow-up questions + condition list)
     path("symptom/survey-llm/", SymptomSurveyLlmView.as_view(), name="symptom-survey-llm"),
