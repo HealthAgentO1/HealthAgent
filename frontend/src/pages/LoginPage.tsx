@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
 import { isAxiosError } from "axios";
+import { getBroadcastEligibility } from "../api/broadcastEligibility";
+import { useAuth } from "../context/AuthContext";
 
 const LoginPage = () => {
   const { login } = useAuth();
@@ -26,6 +27,15 @@ const LoginPage = () => {
     setSubmitting(true);
     try {
       await login(email.trim(), password);
+      try {
+        const { eligible } = await getBroadcastEligibility();
+        if (eligible) {
+          navigate("/admin/broadcast", { replace: true });
+          return;
+        }
+      } catch {
+        /* ignore — proceed to app if eligibility check fails */
+      }
       navigate(redirectTo, { replace: true });
     } catch (err) {
       if (isAxiosError(err) && err.response?.data) {

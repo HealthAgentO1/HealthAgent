@@ -11,6 +11,7 @@ const navItems = [
     label: "Medication Safety",
   },
   { to: "/reports", icon: "assessment", label: "Reports" },
+  { to: "/settings", icon: "manage_accounts", label: "Settings & profile" },
 ];
 
 const Sidebar: React.FC = () => {

@@ -8,8 +8,10 @@ import MedicationSafetyPage from "./pages/MedicationSafetyPage";
 import MedicationSafetyDetailPage from "./pages/MedicationSafetyDetailPage";
 import ReportsPage from "./pages/ReportsPage";
 import EmergencyContactPage from "./pages/EmergencyContactPage";
+import SettingsProfilePage from "./pages/SettingsProfilePage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
+import AdminBroadcastPage from "./pages/AdminBroadcastPage";
 
 function App() {
   return (
@@ -20,12 +22,14 @@ function App() {
       </Route>
 
       <Route element={<ProtectedRoute />}>
+        <Route path="/admin/broadcast" element={<AdminBroadcastPage />} />
         <Route element={<Layout />}>
           <Route path="/" element={<DashboardPage />} />
           <Route path="/symptom-check" element={<SymptomCheckPage />} />
           <Route path="/medication-safety" element={<MedicationSafetyPage />} />
           <Route path="/medication-safety/med/:medicationId" element={<MedicationSafetyDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/settings" element={<SettingsProfilePage />} />
           <Route path="/emergency" element={<EmergencyContactPage />} />
         </Route>
       </Route>

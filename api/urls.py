@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from users.views import RegisterView
+from users.views import MeView, RegisterView
 
 from .views import (
     ExampleItemViewSet,
@@ -18,6 +18,7 @@ from .views_symptom import (
     SymptomNearbyFacilitiesView,
     SymptomSurveyLlmView,
 )
+from .views_admin import AdminBroadcastEligibilityView, AdminBroadcastEmailView
 
 router = DefaultRouter()
 router.register(r"items", ExampleItemViewSet)
@@ -55,6 +56,17 @@ urlpatterns = [
         name="medication-recalls",
     ),
     path("auth/register/", RegisterView.as_view(), name="auth-register"),
+    path("auth/me/", MeView.as_view(), name="auth-me"),
+    path(
+        "admin/broadcast-eligibility/",
+        AdminBroadcastEligibilityView.as_view(),
+        name="admin-broadcast-eligibility",
+    ),
+    path(
+        "admin/broadcast-email/",
+        AdminBroadcastEmailView.as_view(),
+        name="admin-broadcast-email",
+    ),
     path("token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path("", include(router.urls)),

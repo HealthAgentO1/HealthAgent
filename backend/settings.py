@@ -174,6 +174,24 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 AUTH_USER_MODEL = "users.User"
 
+# --- Email (broadcast + Django send_mail) ------------------------------------
+# https://docs.djangoproject.com/en/4.2/topics/email/
+# Local dev: console backend prints messages to the runserver terminal.
+DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "HealthOS <webmaster@localhost>")
+SERVER_EMAIL = DEFAULT_FROM_EMAIL
+EMAIL_BACKEND = os.environ.get(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend",
+)
+EMAIL_HOST = os.environ.get("EMAIL_HOST", "localhost")
+EMAIL_PORT = int(os.environ.get("EMAIL_PORT", "587"))
+EMAIL_USE_TLS = os.environ.get("EMAIL_USE_TLS", "True") == "True"
+EMAIL_HOST_USER = os.environ.get("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.environ.get("EMAIL_HOST_PASSWORD", "")
+
+# Lowercase. Only this account may POST /api/admin/broadcast-email/
+BROADCAST_ADMIN_EMAIL = os.environ.get("BROADCAST_ADMIN_EMAIL", "").strip().lower()
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "rest_framework_simplejwt.authentication.JWTAuthentication",
