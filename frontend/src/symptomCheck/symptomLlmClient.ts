@@ -27,6 +27,7 @@ import type {
   SymptomResultsPayload,
   PriceEstimatePayload,
 } from "./types";
+import type { PracticeLocationPayload } from "./practiceLocation";
 
 const SEVERITY_RANK: Record<"mild" | "moderate" | "severe", number> = {
   mild: 0,
@@ -115,6 +116,7 @@ async function postSymptomSurveyLlm(body: SymptomLlmRequestBody): Promise<Survey
 export async function requestFollowUpQuestions(input: {
   symptoms: string;
   insuranceLabel: string;
+  practiceLocation?: PracticeLocationPayload | null;
 }): Promise<FollowUpQuestionsWithSession> {
   const body: SymptomLlmRequestBody = {
     phase: "followup_questions",
@@ -122,6 +124,9 @@ export async function requestFollowUpQuestions(input: {
     user_payload: {
       symptoms: input.symptoms,
       insurance_label: input.insuranceLabel,
+      ...(input.practiceLocation
+        ? { practice_location: input.practiceLocation }
+        : {}),
     },
   };
 
@@ -142,6 +147,7 @@ export async function requestSecondFollowUpQuestions(input: {
   firstRoundAnswers: StructuredFollowUpAnswer[];
   /** Same `SymptomSession.public_id` as round 1 so Django appends to one persisted survey session. */
   sessionId: string;
+  practiceLocation?: PracticeLocationPayload | null;
 }): Promise<FollowUpQuestionsPayload> {
   const body: SymptomLlmRequestBody = {
     phase: "followup_questions_round_2",
@@ -150,6 +156,9 @@ export async function requestSecondFollowUpQuestions(input: {
       symptoms: input.symptoms,
       insurance_label: input.insuranceLabel,
       first_round_answers: input.firstRoundAnswers,
+      ...(input.practiceLocation
+        ? { practice_location: input.practiceLocation }
+        : {}),
     },
     session_id: input.sessionId,
   };
@@ -174,6 +183,7 @@ export async function requestConditionAssessment(input: {
   followUpAnswers: StructuredFollowUpAnswer[];
   /** Required so Django updates the same row created on the follow-up phase. */
   sessionId: string;
+  practiceLocation?: PracticeLocationPayload | null;
 }): Promise<SymptomResultsPayload> {
   const activeMedications = loadActiveRegimen().map((m) => ({
     name: m.name,
@@ -193,6 +203,9 @@ export async function requestConditionAssessment(input: {
       insurance_label: input.insuranceLabel,
       follow_up_answers: input.followUpAnswers,
       active_medications: activeMedications,
+      ...(input.practiceLocation
+        ? { practice_location: input.practiceLocation }
+        : {}),
     },
     session_id: input.sessionId,
   };

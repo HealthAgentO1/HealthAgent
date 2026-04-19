@@ -29,6 +29,11 @@ import {
   validateUserAddress,
   type UserAddress,
 } from '../symptomCheck/addressValidation';
+import {
+  practiceLocationPayloadFromUserAddress,
+  userAddressFromResumePracticeLocation,
+  type PracticeLocationPayload,
+} from '../symptomCheck/practiceLocation';
 
 import {
   buildGoogleMapsUrl,
@@ -44,7 +49,7 @@ import {
   UserAddressFormFields,
   type AddressFieldKey,
 } from '../symptomCheck/UserAddressFormFields';
-import { US_STATE_OPTIONS, type UsStateCode } from '../symptomCheck/usStates';
+import { type UsStateCode } from '../symptomCheck/usStates';
 
 import {
   requestConditionAssessment,
@@ -71,7 +76,6 @@ import {
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from '../symptomCheck/symptomCheckSession';
-import { scrollAppToTop } from '../utils/scrollAppToTop';
 
 const INSURANCE_OPTIONS = [
   { id: 'centene', label: 'Centene / Ambetter' },
@@ -336,7 +340,13 @@ const SymptomCheckPage: React.FC = () => {
     mutationFn: (vars: {
       symptoms: string;
       insuranceLabel: string;
-    }): Promise<FollowUpQuestionsWithSession> => requestFollowUpQuestions(vars),
+      practiceLocation: PracticeLocationPayload | null;
+    }): Promise<FollowUpQuestionsWithSession> =>
+      requestFollowUpQuestions({
+        symptoms: vars.symptoms,
+        insuranceLabel: vars.insuranceLabel,
+        practiceLocation: vars.practiceLocation,
+      }),
   });
 
   const resultsMutation = useMutation({
@@ -345,7 +355,15 @@ const SymptomCheckPage: React.FC = () => {
       insuranceLabel: string;
       followUpAnswers: StructuredFollowUpAnswer[];
       sessionId: string;
-    }) => requestConditionAssessment(vars),
+      practiceLocation: PracticeLocationPayload | null;
+    }) =>
+      requestConditionAssessment({
+        symptoms: vars.symptoms,
+        insuranceLabel: vars.insuranceLabel,
+        followUpAnswers: vars.followUpAnswers,
+        sessionId: vars.sessionId,
+        practiceLocation: vars.practiceLocation,
+      }),
   });
 
   const followUpLoading = followUpMutation.isPending;
@@ -379,7 +397,14 @@ const SymptomCheckPage: React.FC = () => {
   useEffect(() => {
     if (sessionGate !== "ready") return;
     if (urlSessionHydrating) return;
-    if (step !== "intake") return;
+    if (
+      step !== "intake" &&
+      step !== "followup" &&
+      step !== "followup_round_2" &&
+      step !== "results"
+    ) {
+      return;
+    }
     if (suppressProfileAutofillRef.current) return;
     if (
       userAddress.street ||
@@ -426,6 +451,8 @@ const SymptomCheckPage: React.FC = () => {
     let cancelled = false;
     setSessionGate('ready');
     setUrlSessionHydrating(true);
+    setUserAddress({ street: '', city: '', state: '', postalCode: '' });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setLlmError(null);
     setResumeChatNotice(false);
     setPriceEstimate(null);
@@ -441,6 +468,12 @@ const SymptomCheckPage: React.FC = () => {
         setSymptoms(data.symptoms ?? '');
         const resumedSlug = insuranceIdFromLabel(data.insurance_label ?? '');
         setInsurance(resumedSlug);
+        const addrFromServer = userAddressFromResumePracticeLocation(
+          data.practice_location,
+        );
+        if (addrFromServer) {
+          setUserAddress(addrFromServer);
+        }
         setPendingRequest(null);
         setResultsEntered(false);
 
@@ -586,6 +619,7 @@ const SymptomCheckPage: React.FC = () => {
       const data = await followUpMutation.mutateAsync({
         symptoms: input.symptoms,
         insuranceLabel: input.insuranceLabel,
+        practiceLocation: practiceLocationPayloadFromUserAddress(userAddress),
       });
       setSurveyBackendSessionId(data.session_id);
       setFollowUpQuestions(data.questions);
@@ -646,6 +680,7 @@ const SymptomCheckPage: React.FC = () => {
         insuranceLabel: input.insuranceLabel,
         followUpAnswers: structured,
         sessionId: input.backendSessionId,
+        practiceLocation: practiceLocationPayloadFromUserAddress(userAddress),
       });
       setResults({
         ...payload,
@@ -683,6 +718,7 @@ const SymptomCheckPage: React.FC = () => {
         insuranceLabel: insurerLabel,
         firstRoundAnswers: structured,
         sessionId: surveyBackendSessionId,
+        practiceLocation: practiceLocationPayloadFromUserAddress(userAddress),
       });
 
       if (data.questions.length === 0) {
@@ -1839,46 +1875,6 @@ const SymptomCheckPage: React.FC = () => {
                         </p>
                       ) : null}
                       {saveDefaultAddrNotice?.kind === 'error' ? (
-                        <p className="font-body text-xs text-error sm:max-w-[14rem] sm:text-right" role="alert">
-                          {saveDefaultAddrNotice.message}
-                        </p>
-                      ) : null}
-                    </>
-                  }
-                  onUserEdit={() => {
-                    setAddressAutofilledFromProfile(false);
-                    setSaveDefaultAddrNotice(null);
-                  }}
-                />
-
-                  </div>
-                ) : null}
-                <UserAddressFormFields
-                  addressFieldBlurred={addressFieldBlurred}
-                  errors={addressValidation.errors}
-                  idPrefix="addr"
-                  legend="Current address"
-                  description="Used to rank nearby facilities for your situation. US addresses only (NPPES directory)."
-                  setAddressFieldBlurred={setAddressFieldBlurred}
-                  setUserAddress={setUserAddress}
-                  showRequiredMarkers
-                  userAddress={userAddress}
-                  zipRowEnd={
-                    <>
-                      <button
-                        className="inline-flex w-full cursor-pointer items-center justify-center rounded-xl border border-primary/35 bg-primary-fixed/15 px-4 py-3 font-headline text-sm font-semibold text-primary shadow-inner transition-colors hover:bg-primary-fixed/25 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto"
-                        disabled={!addressValidation.valid || saveDefaultAddrBusy}
-                        type="button"
-                        onClick={() => void handleSaveAsDefaultAddress()}
-                      >
-                        {saveDefaultAddrBusy ? "Saving…" : "Save as default address"}
-                      </button>
-                      {saveDefaultAddrNotice?.kind === "success" ? (
-                        <p className="font-body text-xs text-secondary sm:max-w-[14rem] sm:text-right" role="status">
-                          Saved to your account.
-                        </p>
-                      ) : null}
-                      {saveDefaultAddrNotice?.kind === "error" ? (
                         <p className="font-body text-xs text-error sm:max-w-[14rem] sm:text-right" role="alert">
                           {saveDefaultAddrNotice.message}
                         </p>
