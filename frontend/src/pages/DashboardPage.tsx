@@ -30,7 +30,7 @@ const DashboardPage: React.FC = () => {
         <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <h1 className="font-headline text-4xl md:text-[3.5rem] leading-none font-bold text-primary tracking-tight mb-2">
-              Health Hub
+              HealthOS
             </h1>
             <p className="font-body text-on-surface-variant text-base">
               Your clinical sanctuary for holistic well-being.

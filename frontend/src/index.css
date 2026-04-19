@@ -98,14 +98,17 @@ h1, h2, h3, h4, h5, h6 {
   font-variation-settings: "FILL" 1, "wght" 400, "GRAD" 0, "opsz" 24;
 }
 
-/* ── Ambient Shadow Utility ── */
-.shadow-ambient {
-  box-shadow: 0 12px 32px rgba(24, 28, 32, 0.05);
-}
+/* Custom utilities must live in @layer so Tailwind variants (e.g. hover:shadow) can override them. */
+@layer utilities {
+  /* ── Ambient Shadow Utility ── */
+  .shadow-ambient {
+    box-shadow: 0 12px 32px rgba(24, 28, 32, 0.05);
+  }
 
-/* ── Ghost Border Utility ── */
-.border-ghost {
-  border: 1px solid rgba(194, 198, 211, 0.2);
+  /* ── Ghost Border Utility ── */
+  .border-ghost {
+    border: 1px solid rgba(194, 198, 211, 0.2);
+  }
 }
 
 /* ── Glass Panel Utility ── */

@@ -6,7 +6,7 @@ from rest_framework import status
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from api.models import MedicationProfile
-from api.services.medication_llm_service import MedicationLlmError
+from api.services.medication_llm_service import MedicationLlmError, parse_medication_llm_json
 from api.services.medication_extraction import extract_medications_with_rxnorm
 from api.views_medication import MedicationProfileExtractView
 
@@ -19,11 +19,18 @@ class MedicationExtractionServiceTests(TestCase):
     @patch("api.services.medication_extraction.extract_medication_names_via_llm")
     def test_extract_uses_deepseek_rxnorm_when_present(self, mock_llm, mock_rxnav):
         mock_llm.return_value = [
-            {"name": "lisinopril", "rxnorm_id": "29046"},
+            {
+                "name": "lisinopril",
+                "common_name": None,
+                "scientific_name": "lisinopril",
+                "rxnorm_id": "29046",
+            },
         ]
         out = extract_medications_with_rxnorm("lisinopril 10mg daily")
         self.assertEqual(len(out), 1)
         self.assertEqual(out[0]["name"], "lisinopril")
+        self.assertIsNone(out[0]["common_name"])
+        self.assertEqual(out[0]["scientific_name"], "lisinopril")
         self.assertEqual(out[0]["rxnorm_id"], "29046")
         self.assertEqual(out[0]["rxnorm_source"], "deepseek")
         mock_rxnav.assert_not_called()
@@ -32,13 +39,38 @@ class MedicationExtractionServiceTests(TestCase):
     @patch("api.services.medication_extraction.extract_medication_names_via_llm")
     def test_extract_falls_back_to_rxnav(self, mock_llm, mock_rxnav):
         mock_llm.return_value = [
-            {"name": "metformin", "rxnorm_id": None},
+            {
+                "name": "metformin",
+                "common_name": None,
+                "scientific_name": "metformin",
+                "rxnorm_id": None,
+            },
         ]
         mock_rxnav.return_value = "6809"
         out = extract_medications_with_rxnorm("metformin")
         self.assertEqual(out[0]["rxnorm_id"], "6809")
         self.assertEqual(out[0]["rxnorm_source"], "rxnav")
         mock_rxnav.assert_called_once_with("metformin")
+        self.assertIsNone(out[0]["common_name"])
+        self.assertEqual(out[0]["scientific_name"], "metformin")
+
+    def test_parse_json_common_and_scientific(self):
+        raw = (
+            '{"medications": [{"common_name": "Advil", "scientific_name": "ibuprofen", "rxnorm_id": null}]}'
+        )
+        out = parse_medication_llm_json(raw)
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["common_name"], "Advil")
+        self.assertEqual(out[0]["scientific_name"], "ibuprofen")
+        self.assertEqual(out[0]["name"], "ibuprofen")
+
+    def test_parse_json_legacy_name_only(self):
+        raw = '{"medications": [{"name": "warfarin", "rxnorm_id": null}]}'
+        out = parse_medication_llm_json(raw)
+        self.assertEqual(len(out), 1)
+        self.assertIsNone(out[0]["common_name"])
+        self.assertIsNone(out[0]["scientific_name"])
+        self.assertEqual(out[0]["name"], "warfarin")
 
 
 @override_settings(DEBUG=False, OPENAI_API_KEY="test-key")
@@ -54,7 +86,13 @@ class MedicationProfileExtractApiTests(TestCase):
     @patch("api.views_medication.extract_medications_with_rxnorm")
     def test_post_creates_profile(self, mock_extract):
         mock_extract.return_value = [
-            {"name": "aspirin", "rxnorm_id": "1191", "rxnorm_source": "deepseek"},
+            {
+                "name": "aspirin",
+                "common_name": None,
+                "scientific_name": "aspirin",
+                "rxnorm_id": "1191",
+                "rxnorm_source": "deepseek",
+            },
         ]
         res = self.client.post(
             "/api/medication-profile/extract/",
