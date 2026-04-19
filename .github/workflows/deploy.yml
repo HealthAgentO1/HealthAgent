@@ -49,6 +49,8 @@ jobs:
           image: us-central1-docker.pkg.dev/${{ env.PROJECT_ID }}/health-guardian-repo/${{ env.BACKEND_SERVICE }}:${{ github.sha }}
           env_vars: |
             DJANGO_DEBUG=False
+            POSTGRES_DB=myprojectdb
+            POSTGRES_USER=myprojectuser
             POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db
             DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
             OPENFDA_API_KEY=${{ secrets.OPENFDA_API_KEY }}
@@ -83,7 +85,7 @@ jobs:
             --command python \
             --args manage.py,migrate \
             --region ${{ env.REGION }} \
-            --set-env-vars DJANGO_DEBUG=False,POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
+            --set-env-vars DJANGO_DEBUG=False,POSTGRES_DB=myprojectdb,POSTGRES_USER=myprojectuser,POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
             --set-secrets POSTGRES_PASSWORD=DB_PASSWORD:latest \
             --set-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
             --execute-now --wait
