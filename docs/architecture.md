@@ -48,3 +48,11 @@ The **Symptom Check** flow (`/symptom-check`) is a **three-step survey** in Reac
 - **Conversational chat** (`POST /api/symptom/chat/`) uses a separate system prompt file on the server: `api/prompts/symptom_chat_system.txt` (JSON reply with `assistant_message`, `triage_level`, etc.).
 
 The diagram above remains the target for deeper orchestration (sessions, NPPES); the survey path already routes LLM traffic through **Django** for credential safety.
+
+### Client-side session persistence (Symptom Check survey)
+
+The **`/symptom-check`** React page mirrors survey state to **`localStorage`** under a versioned key (`frontend/src/symptomCheck/symptomCheckSession.ts`) so users can recover progress after a **refresh** or **in-app navigation** in the same browser profile. On load, if a recoverable snapshot exists, the UI offers **Resume** (restore answers and step) or **Start over** (clear storage and reset the wizard).
+
+- **In-flight LLM calls:** If the user leaves while `requestFollowUpQuestions` or `requestConditionAssessment` is pending, the snapshot records which phase was active. Choosing **Resume** re-sends the same API request with the saved intake or follow-up payload; this mirrors server-side stateless survey turns (`POST /api/symptom/survey-llm/`) and does not duplicate server session state.
+
+- **Scope:** Persistence is **browser-local only** (not synced across devices or accounts). Clearing site data or using another browser profile starts fresh.

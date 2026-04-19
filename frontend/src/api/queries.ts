@@ -8,6 +8,8 @@ export interface Provider {
   specialty: string;
   address: string;
   distance_approx: string;
+  taxonomy_code?: string;
+  phone?: string;
 }
 
 // Symptom session data
@@ -20,15 +22,46 @@ export interface SymptomSession {
   booking_status: string;
   pre_visit_report: any | null;
   created_at: string;
+  /** Present when booking API returns a confirmation (mock or real). */
+  confirmation_number?: string;
 }
 
-export interface CreateSymptomSessionData {
-  insurance_details: {
-    plan: string;
-    provider: string;
-  };
-  // Add other fields as needed
+/** `GET /sessions/` — dashboard history cards */
+export interface SymptomSessionListItem {
+  session_id: string;
+  triage_level: string | null;
+  created_at: string;
+  summary: string;
 }
+
+/** `GET /sessions/<uuid>/` — hydrate Symptom Check from a saved server session */
+export interface SymptomSessionResume {
+  session_id: string;
+  resume_step: "intake" | "followup" | "results" | "chat";
+  symptoms: string;
+  insurance_label: string;
+  followup_raw_text?: string;
+  results_raw_text?: string;
+  triage_level: string | null;
+  created_at: string;
+}
+
+export async function fetchSymptomSessionResume(sessionId: string): Promise<SymptomSessionResume> {
+  const { data } = await apiClient.get<SymptomSessionResume>(`/sessions/${sessionId}/`);
+  return data;
+}
+
+const fetchSymptomSessions = async (): Promise<SymptomSessionListItem[]> => {
+  const { data } = await apiClient.get<SymptomSessionListItem[]>("/sessions/");
+  return data;
+};
+
+export const useSymptomSessions = () => {
+  return useQuery({
+    queryKey: ["symptom-sessions"],
+    queryFn: fetchSymptomSessions,
+  });
+};
 
 // Example API fetcher using our Axios client
 const fetchProviders = async (zip: string, specialty?: string): Promise<Provider[]> => {
@@ -36,12 +69,6 @@ const fetchProviders = async (zip: string, specialty?: string): Promise<Provider
     params: { zip, specialty },
   });
   return data;
-};
-
-// Create symptom session
-const createSymptomSession = async (data: CreateSymptomSessionData): Promise<SymptomSession> => {
-  const { data: response } = await apiClient.post<SymptomSession>("/symptom-sessions/", data);
-  return response;
 };
 
 // Example React Query hook that developers can adapt for their slices

@@ -1,11 +1,45 @@
-from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from rest_framework import status
 import uuid
+
+from rest_framework import generics, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
 from .models import ExampleItem, SymptomSession
-from .serializers import ExampleItemSerializer, SymptomSessionSerializer
+from .serializers import (
+    ExampleItemSerializer,
+    SymptomSessionListSerializer,
+    SymptomSessionResumeSerializer,
+    SymptomSessionSerializer,
+)
+
+class UserSymptomSessionsListView(generics.ListAPIView):
+    """
+    GET /api/sessions/ — authenticated user's symptom triage history for the dashboard.
+    """
+
+    serializer_class = SymptomSessionListSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        return SymptomSession.objects.filter(user=self.request.user).order_by(
+            "-created_at", "-pk"
+        )
+
+
+class UserSymptomSessionRetrieveView(generics.RetrieveAPIView):
+    """
+    GET /api/sessions/<uuid>/ — resume payload for Symptom Check deep links from the dashboard.
+    """
+
+    serializer_class = SymptomSessionResumeSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = "public_id"
+    lookup_url_kwarg = "session_public_id"
+
+    def get_queryset(self):
+        return SymptomSession.objects.filter(user=self.request.user)
+
 
 class ExampleItemViewSet(viewsets.ModelViewSet):
     """
@@ -55,3 +89,70 @@ class SymptomSessionViewSet(viewsets.ModelViewSet):
         
         serializer = self.get_serializer(session)
         return Response(serializer.data)
+
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import AllowAny
+from django.http import Http404
+import logging
+
+from .services.nppes_service import NPPESService, ProviderDataMapper
+
+logger = logging.getLogger(__name__)
+
+
+class ProvidersView(APIView):
+    """
+    NPPES provider search endpoint.
+    
+    GET /providers/?zip=94107&specialty=Family%20Medicine
+    """
+    permission_classes = [AllowAny]
+
+    def get(self, request):
+        # Get query parameters
+        zip_code = request.query_params.get('zip')
+        specialty = request.query_params.get('specialty')
+
+        logger.info(f"Providers search request: zip={zip_code}, specialty={specialty}")
+
+        # Validate required parameters
+        if not zip_code:
+            return Response(
+                {'error': 'zip parameter is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Basic ZIP code validation
+        import re
+        if not re.match(r'^\d{5}(-\d{4})?$', zip_code):
+            return Response(
+                {'error': 'Invalid ZIP code format. Use 5 digits or ZIP+4 format.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            # Search NPPES for providers
+            raw_providers = NPPESService.search_providers(
+                zip_code=zip_code,
+                specialty=specialty,
+                limit=20
+            )
+
+            logger.info(f"Raw providers from NPPES: {len(raw_providers)}")
+
+            # Map and sanitize the data
+            providers = ProviderDataMapper.map_providers(raw_providers)
+
+            logger.info(f"Mapped providers: {len(providers)}")
+
+            return Response(providers)
+
+        except Exception as e:
+            logger.exception(f"Error searching providers: {e}")
+            return Response(
+                {'error': 'Failed to search providers. Please try again.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

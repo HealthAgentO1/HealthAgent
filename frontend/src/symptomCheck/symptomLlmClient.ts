@@ -17,6 +17,7 @@ import {
 } from "./validatePayloads";
 import type {
   FollowUpQuestionsPayload,
+  FollowUpQuestionsWithSession,
   SymptomLlmPhase,
   SymptomLlmRequestBody,
   SymptomResultsPayload,
@@ -47,12 +48,18 @@ function getSurveyLlmErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Symptom Check request failed.";
 }
 
+type SurveyLlmApiResponse = {
+  raw_text: string;
+  phase: SymptomLlmPhase;
+  session_id: string;
+};
+
 /** Raw model output from Django; client validates against survey JSON schemas. */
-async function postSymptomSurveyLlm(body: SymptomLlmRequestBody): Promise<string> {
+async function postSymptomSurveyLlm(body: SymptomLlmRequestBody): Promise<SurveyLlmApiResponse> {
   try {
-    const { data } = await apiClient.post<{ raw_text: string }>(SURVEY_LLM_PATH, body);
+    const { data } = await apiClient.post<SurveyLlmApiResponse>(SURVEY_LLM_PATH, body);
     if (typeof data.raw_text === "string" && data.raw_text.trim().length > 0) {
-      return data.raw_text;
+      return data;
     }
     throw new Error("Survey LLM response missing raw_text.");
   } catch (err) {
@@ -64,7 +71,7 @@ async function postSymptomSurveyLlm(body: SymptomLlmRequestBody): Promise<string
 export async function requestFollowUpQuestions(input: {
   symptoms: string;
   insuranceLabel: string;
-}): Promise<FollowUpQuestionsPayload> {
+}): Promise<FollowUpQuestionsWithSession> {
   const body: SymptomLlmRequestBody = {
     phase: "followup_questions",
     system_prompt: followupContext.trim(),
@@ -74,9 +81,14 @@ export async function requestFollowUpQuestions(input: {
     },
   };
 
-  const raw = await postSymptomSurveyLlm(body);
-  const parsed = parseJsonObjectFromLlm(raw);
-  return validateFollowUpQuestionsPayload(parsed);
+  const res = await postSymptomSurveyLlm(body);
+  const parsed = parseJsonObjectFromLlm(res.raw_text);
+  const validated = validateFollowUpQuestionsPayload(parsed);
+  const out: FollowUpQuestionsWithSession = {
+    questions: validated.questions,
+    session_id: res.session_id,
+  };
+  return out;
 }
 
 /** Second round of follow-up questions: based on first round answers to narrow further. */
@@ -113,6 +125,8 @@ export async function requestConditionAssessment(input: {
   symptoms: string;
   insuranceLabel: string;
   followUpAnswers: StructuredFollowUpAnswer[];
+  /** Required so Django updates the same row created on the follow-up phase. */
+  sessionId: string;
 }): Promise<SymptomResultsPayload> {
   const body: SymptomLlmRequestBody = {
     phase: "condition_assessment",
@@ -122,10 +136,11 @@ export async function requestConditionAssessment(input: {
       insurance_label: input.insuranceLabel,
       follow_up_answers: input.followUpAnswers,
     },
+    session_id: input.sessionId,
   };
 
-  const raw = await postSymptomSurveyLlm(body);
-  const parsed = parseJsonObjectFromLlm(raw);
+  const res = await postSymptomSurveyLlm(body);
+  const parsed = parseJsonObjectFromLlm(res.raw_text);
   const validated = validateSymptomResultsPayload(parsed);
 
   // UI intentionally omits this; a future Django/NPPES step will consume it.
@@ -134,4 +149,9 @@ export async function requestConditionAssessment(input: {
   return validated;
 }
 
-export type { FollowUpQuestionsPayload, SymptomResultsPayload, SymptomLlmPhase };
+export type {
+  FollowUpQuestionsPayload,
+  FollowUpQuestionsWithSession,
+  SymptomResultsPayload,
+  SymptomLlmPhase,
+};
