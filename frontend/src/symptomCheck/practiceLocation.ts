@@ -25,6 +25,22 @@ export function practiceLocationPayloadFromUserAddress(
   };
 }
 
+function normalizePostalCodeFive(raw: unknown): string {
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 0) {
+    const s = String(Math.trunc(raw));
+    if (s.length > 5) return '';
+    return s.padStart(5, '0');
+  }
+  if (typeof raw !== 'string') return '';
+  let s = raw.trim();
+  if (!s) return '';
+  if (s.includes('-')) s = s.split('-', 1)[0]?.trim() ?? '';
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 5) return digits.slice(0, 5);
+  if (digits.length > 0) return digits.padStart(5, '0');
+  return '';
+}
+
 /** Restore step-1 address from server resume JSON (snake_case). */
 export function userAddressFromResumePracticeLocation(
   raw: unknown,
@@ -35,8 +51,7 @@ export function userAddressFromResumePracticeLocation(
   const city = typeof o.city === 'string' ? o.city.trim() : '';
   const stateStr =
     typeof o.state === 'string' ? o.state.trim().toUpperCase() : '';
-  const postalCode =
-    typeof o.postal_code === 'string' ? o.postal_code.trim() : '';
+  const postalCode = normalizePostalCodeFive(o.postal_code);
   const state: UsStateCode | '' = isUsStateCode(stateStr) ? stateStr : '';
   const candidate: UserAddress = { street, city, state, postalCode };
   const { valid } = validateUserAddress(candidate);

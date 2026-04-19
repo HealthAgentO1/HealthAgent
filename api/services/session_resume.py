@@ -53,6 +53,34 @@ def _payload_symptoms_insurance(payload: dict[str, Any] | None) -> tuple[str, st
     return sym, ins
 
 
+def _normalize_postal_code_five(raw: Any) -> str | None:
+    """Accept legacy JSON shapes (ZIP+4 strings, numeric ZIPs) and return 5-digit USPS ZIP."""
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
+        if raw < 0:
+            return None
+        s = str(raw)
+        if len(s) > 5:
+            return None
+        return s.zfill(5)
+    if not isinstance(raw, str):
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    if "-" in s:
+        s = s.split("-", 1)[0].strip()
+    digits = "".join(ch for ch in s if ch.isdigit())
+    if len(digits) >= 5:
+        return digits[:5]
+    if 0 < len(digits) < 5:
+        return digits.zfill(5)
+    return None
+
+
 def _payload_practice_location(
     payload: dict[str, Any] | None,
 ) -> dict[str, str] | None:
@@ -65,14 +93,16 @@ def _payload_practice_location(
     street = raw.get("street")
     city = raw.get("city")
     state = raw.get("state")
-    postal = raw.get("postal_code")
-    if not all(isinstance(x, str) for x in (street, city, state, postal)):
+    postal_raw = raw.get("postal_code")
+    if not isinstance(street, str) or not isinstance(city, str) or not isinstance(state, str):
         return None
-    street_s, city_s, state_s, postal_s = (
+    postal_s = _normalize_postal_code_five(postal_raw)
+    if postal_s is None:
+        return None
+    street_s, city_s, state_s = (
         street.strip(),
         city.strip(),
         state.strip().upper(),
-        postal.strip(),
     )
     if len(street_s) < 3 or len(city_s) < 2:
         return None
@@ -86,6 +116,22 @@ def _payload_practice_location(
         "state": state_s,
         "postal_code": postal_s,
     }
+
+
+def _latest_practice_location_from_survey_turns(
+    turns: list[dict[str, Any]],
+) -> dict[str, str] | None:
+    """Walk newest → oldest turns so we pick up an address from any phase (legacy logs vary)."""
+    for t in reversed(turns):
+        if not isinstance(t, dict):
+            continue
+        up = t.get("user_payload")
+        if not isinstance(up, dict):
+            continue
+        loc = _payload_practice_location(up)
+        if loc is not None:
+            return loc
+    return None
 
 
 def build_session_resume_payload(session: SymptomSession) -> SessionResumePayload:
@@ -144,9 +190,7 @@ def build_session_resume_payload(session: SymptomSession) -> SessionResumePayloa
             base["insurance_label"] = ins_l or ins_f
             if first_followup and isinstance(first_followup.get("raw_text"), str):
                 base["followup_raw_text"] = first_followup["raw_text"]
-            loc = _payload_practice_location(up_last) or _payload_practice_location(
-                up_first
-            )
+            loc = _latest_practice_location_from_survey_turns(turns)
             if loc is not None:
                 base["practice_location"] = loc
             return base
@@ -162,7 +206,7 @@ def build_session_resume_payload(session: SymptomSession) -> SessionResumePayloa
             sym0, ins0 = _payload_symptoms_insurance(up0)
             base["symptoms"] = sym0
             base["insurance_label"] = ins0
-            loc0 = _payload_practice_location(up0 if isinstance(up0, dict) else None)
+            loc0 = _latest_practice_location_from_survey_turns(turns)
             if loc0 is not None:
                 base["practice_location"] = loc0
             return base
