@@ -1,6 +1,5 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { useSymptomSessions } from "../api/queries";
 import { triageBadgeClasses } from "../utils/triageSeverityStyles";
 import { useDeleteSymptomSession, useSymptomSessions } from "../api/queries";
 
