@@ -55,9 +55,28 @@ export type SymptomResultsPayload = {
   overall_patient_severity: "mild" | "moderate" | "severe";
   conditions: ConditionAssessment[];
   care_taxonomy: CareTaxonomy;
+  /**
+   * Client-only: insurer id from step 1, copied here when results load so the NPPES request
+   * always has a slug (avoids races with React state / resume).
+   */
+  intake_insurer_slug?: string;
 };
 
-export type SymptomLlmPhase = "followup_questions" | "followup_questions_round_2" | "condition_assessment";
+export type SymptomLlmPhase =
+  | "followup_questions"
+  | "followup_questions_round_2"
+  | "condition_assessment"
+  | "price_estimate_context";
+
+/** LLM JSON for illustrative cost copy on the results step (`price_estimate_context` phase). */
+export type PriceEstimatePayload = {
+  /** Short human-readable band, e.g. "~$150–$600" or "Roughly $500–$3,000 (before plan)" — not a quote. */
+  cost_range_label: string;
+  /** What the band assumes, plan caveats, and why actual cost differs. */
+  cost_range_explanation: string;
+  /** Optional extra paragraphs after the explanation. */
+  paragraphs?: string[];
+};
 
 /** POST body for `POST /api/symptom/survey-llm/` (matches `SymptomSurveyLlmSerializer`). */
 export type SymptomLlmRequestBody = {

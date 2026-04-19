@@ -16,6 +16,7 @@ class SessionResumePayload(TypedDict, total=False):
     insurance_label: str
     followup_raw_text: str
     results_raw_text: str
+    price_estimate_raw_text: str
     triage_level: str | None
     created_at: str
 
@@ -76,6 +77,13 @@ def build_session_resume_payload(session: SymptomSession) -> SessionResumePayloa
         if last_condition is not None:
             base["resume_step"] = "results"
             base["results_raw_text"] = last_condition["raw_text"]
+            last_price = None
+            for t in reversed(turns):
+                if t.get("phase") == "price_estimate_context" and isinstance(t.get("raw_text"), str):
+                    last_price = t
+                    break
+            if last_price is not None:
+                base["price_estimate_raw_text"] = last_price["raw_text"]
             up_last = (
                 last_condition.get("user_payload")
                 if isinstance(last_condition.get("user_payload"), dict)

@@ -6,6 +6,7 @@ import type {
   ConditionAssessment,
   FollowUpQuestion,
   FollowUpQuestionsPayload,
+  PriceEstimatePayload,
   QuestionInputType,
   SymptomResultsPayload,
 } from "./types";
@@ -192,4 +193,42 @@ export function validateSymptomResultsPayload(value: unknown): SymptomResultsPay
       rationale_for_routing: ct.rationale_for_routing,
     },
   };
+}
+
+export function validatePriceEstimatePayload(value: unknown): PriceEstimatePayload {
+  if (!isRecord(value)) {
+    throw new Error("Invalid price estimate payload: not an object.");
+  }
+  if (!isNonEmptyString(value.cost_range_label)) {
+    throw new Error("Invalid price estimate payload: cost_range_label must be a non-empty string.");
+  }
+  if (!isNonEmptyString(value.cost_range_explanation)) {
+    throw new Error("Invalid price estimate payload: cost_range_explanation must be a non-empty string.");
+  }
+
+  /** Legacy responses may include paragraphs; we ignore them client-side to save display noise. */
+  let paragraphs: string[] | undefined;
+  if ("paragraphs" in value && value.paragraphs !== undefined) {
+    if (!Array.isArray(value.paragraphs)) {
+      throw new Error("Invalid price estimate payload: paragraphs must be an array when present.");
+    }
+    const out: string[] = [];
+    for (let i = 0; i < value.paragraphs.length; i += 1) {
+      const p = value.paragraphs[i];
+      if (!isNonEmptyString(p)) {
+        throw new Error(`Invalid price estimate payload: paragraph ${i} must be a non-empty string.`);
+      }
+      out.push(p.trim());
+    }
+    paragraphs = out;
+  }
+
+  const base: PriceEstimatePayload = {
+    cost_range_label: value.cost_range_label.trim(),
+    cost_range_explanation: value.cost_range_explanation.trim(),
+  };
+  if (paragraphs !== undefined && paragraphs.length > 0) {
+    base.paragraphs = paragraphs;
+  }
+  return base;
 }

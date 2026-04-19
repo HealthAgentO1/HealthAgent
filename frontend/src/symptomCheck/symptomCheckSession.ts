@@ -7,10 +7,16 @@
  * When the user leaves during an in-flight LLM request, `pendingRequest` records which
  * phase was active; the UI re-sends that request on "Resume" (see `SymptomCheckPage`).
  */
-import type { FollowUpQuestion, FollowUpAnswer, SymptomResultsPayload } from "./types";
+import type {
+  FollowUpQuestion,
+  FollowUpAnswer,
+  PriceEstimatePayload,
+  SymptomResultsPayload,
+} from "./types";
+import { validatePriceEstimatePayload } from "./validatePayloads";
 
 /** Bump when the persisted shape changes incompatibly. */
-export const SYMPTOM_CHECK_SESSION_VERSION = 3 as const;
+export const SYMPTOM_CHECK_SESSION_VERSION = 4 as const;
 
 const STORAGE_KEY = "healthos.symptom_check.session.v1";
 const LEGACY_STORAGE_KEY = "healthagent.symptom_check.session.v1";
@@ -52,6 +58,9 @@ export type SymptomCheckSessionSnapshot = {
   llmError: string | null;
   /** Django `SymptomSession.public_id` after the follow-up LLM call; required for assessment. */
   surveyBackendSessionId: string | null;
+  /** Cached price LLM output; paired with `priceEstimateCacheFingerprint`. */
+  priceEstimate: PriceEstimatePayload | null;
+  priceEstimateCacheFingerprint: string | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -145,7 +154,7 @@ function isLegacyV1(value: unknown): value is LegacyV1Snapshot {
   return true;
 }
 
-function migrateV1ToV3(raw: LegacyV1Snapshot): SymptomCheckSessionSnapshot {
+function migrateV1ToV4(raw: LegacyV1Snapshot): SymptomCheckSessionSnapshot {
   return {
     version: SYMPTOM_CHECK_SESSION_VERSION,
     updatedAt: raw.updatedAt,
@@ -161,11 +170,13 @@ function migrateV1ToV3(raw: LegacyV1Snapshot): SymptomCheckSessionSnapshot {
     pendingRequest: raw.pendingRequest,
     llmError: raw.llmError,
     surveyBackendSessionId: null,
+    priceEstimate: null,
+    priceEstimateCacheFingerprint: null,
   };
 }
 
 /** v2: address + survey id, no second question round fields. */
-function migrateV2RecordToV3(raw: Record<string, unknown>): SymptomCheckSessionSnapshot | null {
+function migrateV2RecordToV4(raw: Record<string, unknown>): SymptomCheckSessionSnapshot | null {
   if (raw.version !== 2) return null;
   if (typeof raw.updatedAt !== "string") return null;
   const step = raw.step;
@@ -201,21 +212,41 @@ function migrateV2RecordToV3(raw: Record<string, unknown>): SymptomCheckSessionS
     pendingRequest: pr,
     llmError: raw.llmError,
     surveyBackendSessionId,
+    priceEstimate: null,
+    priceEstimateCacheFingerprint: null,
   };
+}
+
+function parseStoredPriceFields(raw: Record<string, unknown>): {
+  priceEstimate: PriceEstimatePayload | null;
+  priceEstimateCacheFingerprint: string | null;
+} {
+  let priceEstimate: PriceEstimatePayload | null = null;
+  if (raw.priceEstimate != null) {
+    try {
+      priceEstimate = validatePriceEstimatePayload(raw.priceEstimate);
+    } catch {
+      priceEstimate = null;
+    }
+  }
+  const fp = raw.priceEstimateCacheFingerprint;
+  const priceEstimateCacheFingerprint =
+    typeof fp === "string" && fp.trim() !== "" ? fp.trim() : null;
+  return { priceEstimate, priceEstimateCacheFingerprint };
 }
 
 function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
   if (!isRecord(raw)) return null;
 
   if (raw.version === 1) {
-    return isLegacyV1(raw) ? migrateV1ToV3(raw) : null;
+    return isLegacyV1(raw) ? migrateV1ToV4(raw) : null;
   }
 
   if (raw.version === 2) {
-    return migrateV2RecordToV3(raw);
+    return migrateV2RecordToV4(raw);
   }
 
-  if (raw.version !== SYMPTOM_CHECK_SESSION_VERSION) return null;
+  if (raw.version !== 3 && raw.version !== SYMPTOM_CHECK_SESSION_VERSION) return null;
   if (typeof raw.updatedAt !== "string") return null;
   if (!isFlowStep(raw.step)) return null;
   if (typeof raw.symptoms !== "string") return null;
@@ -235,6 +266,8 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
       ? raw.surveyBackendSessionId.trim()
       : null;
 
+  const { priceEstimate, priceEstimateCacheFingerprint } = parseStoredPriceFields(raw);
+
   return {
     version: SYMPTOM_CHECK_SESSION_VERSION,
     updatedAt: raw.updatedAt,
@@ -250,6 +283,8 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
     pendingRequest: raw.pendingRequest,
     llmError: raw.llmError,
     surveyBackendSessionId,
+    priceEstimate,
+    priceEstimateCacheFingerprint,
   };
 }
 

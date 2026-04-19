@@ -91,6 +91,37 @@ class SymptomSessionResumeDetailTests(APITestCase):
         self.assertIn("results_raw_text", res.data)
         self.assertIn("followup_raw_text", res.data)
 
+    def test_resume_results_includes_price_estimate_raw_text(self):
+        price_json = '{"cost_range_label":"~$50–$200","cost_range_explanation":"Cached line."}'
+        s = SymptomSession.objects.create(
+            user=self.user,
+            triage_level="routine",
+            ai_conversation_log=[
+                {
+                    "role": "survey_turn",
+                    "phase": "followup_questions",
+                    "user_payload": {"symptoms": "headache", "insurance_label": "United Healthcare"},
+                    "raw_text": '{"questions":[{"id":"q1","prompt":"Fever?","required":true,"input_type":"single_choice","options":[{"id":"y","label":"Yes"},{"id":"n","label":"No"}]}]}',
+                },
+                {
+                    "role": "survey_turn",
+                    "phase": "condition_assessment",
+                    "user_payload": {"symptoms": "headache", "insurance_label": "United Healthcare"},
+                    "raw_text": '{"overall_patient_severity":"mild","conditions":[{"title":"Tension","explanation":"x","why_possible":"y","condition_severity":"mild"}],"care_taxonomy":{"suggested_care_setting":"PCP","taxonomy_codes":[],"rationale_for_routing":"z"}}',
+                },
+                {
+                    "role": "survey_turn",
+                    "phase": "price_estimate_context",
+                    "user_payload": {},
+                    "raw_text": price_json,
+                },
+            ],
+        )
+        res = self.client.get(f"/api/sessions/{s.public_id}/")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["resume_step"], "results")
+        self.assertEqual(res.data.get("price_estimate_raw_text"), price_json)
+
     def test_resume_chat(self):
         s = SymptomSession.objects.create(
             user=self.user,

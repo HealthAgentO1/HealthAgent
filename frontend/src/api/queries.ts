@@ -51,6 +51,8 @@ export interface SymptomSessionResume {
   insurance_label: string;
   followup_raw_text?: string;
   results_raw_text?: string;
+  /** Last `price_estimate_context` survey turn, when present — avoids refetching on resume. */
+  price_estimate_raw_text?: string;
   triage_level: string | null;
   created_at: string;
 }
