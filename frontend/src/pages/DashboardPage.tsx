@@ -1,7 +1,13 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { triageBadgeClasses } from "../utils/triageSeverityStyles";
-import { useDeleteSymptomSession, useSymptomSessions } from "../api/queries";
+import {
+  useDeleteSymptomSession,
+  useSymptomSessions,
+  type SymptomSessionListItem,
+} from "../api/queries";
+import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
+import { MedicationNameHeading } from "../medicationSafety/MedicationNameHeading";
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -20,10 +26,33 @@ function triageLabel(level: string | null): string {
   return level.charAt(0).toUpperCase() + level.slice(1);
 }
 
+function pickLatestSession(list: SymptomSessionListItem[]): SymptomSessionListItem | null {
+  if (!list.length) return null;
+  return [...list].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+  )[0];
+}
+
 const DashboardPage: React.FC = () => {
   const { data: sessions, isLoading, isError, error } = useSymptomSessions();
   const deleteSession = useDeleteSymptomSession();
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [regimen, setRegimen] = useState(() => loadActiveRegimen());
+
+  useEffect(() => {
+    const refresh = () => setRegimen(loadActiveRegimen());
+    refresh();
+    const onVis = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
+  const latestSession = useMemo(
+    () => (!sessions?.length ? null : pickLatestSession(sessions)),
+    [sessions],
+  );
 
   const confirmDeleteSession =
     confirmDeleteSessionId && sessions
@@ -100,125 +129,211 @@ const DashboardPage: React.FC = () => {
         <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-8">
           {/* Care Pathway Hero Card */}
           <div className="col-span-1 md:col-span-12 lg:col-span-8 bg-gradient-to-br from-primary to-primary-container rounded-xl p-8 relative overflow-hidden flex flex-col justify-between min-h-[320px] shadow-ambient">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4"></div>
-            <div className="relative z-10">
-              <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-on-primary text-xs font-semibold uppercase tracking-wider mb-6">
-                <span className="material-symbols-outlined text-[16px]">
-                  directions
-                </span>
-                Active Care Pathway
+              <div className="absolute top-0 right-0 w-64 h-64 bg-white opacity-5 rounded-full blur-3xl -translate-y-1/2 translate-x-1/4" />
+              <div className="relative z-10">
+                <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-on-primary text-xs font-semibold uppercase tracking-wider mb-6">
+                  <span className="material-symbols-outlined text-[16px]">directions</span>
+                  Active Care Pathway
+                </div>
+                {isLoading ? (
+                  <>
+                    <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
+                      Loading your care timeline…
+                    </h3>
+                    <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
+                      One moment while we load your saved symptom checks.
+                    </p>
+                  </>
+                ) : isError ? (
+                  <>
+                    <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
+                      Symptom history is unavailable
+                    </h3>
+                    <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
+                      {error instanceof Error ? error.message : "You can still run a new check."}
+                    </p>
+                  </>
+                ) : latestSession ? (
+                  <>
+                    <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
+                      Review or update your latest symptom check
+                    </h3>
+                    <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
+                      Last documented {formatSessionTimestamp(latestSession.created_at)}. Open it
+                      to see details, or start fresh if something has changed.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
+                      Start your first symptom check
+                    </h3>
+                    <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
+                      A short guided interview creates a record you can revisit and share with your
+                      care team.
+                    </p>
+                  </>
+                )}
               </div>
-              <h2 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
-                Complete your pre-assessment for Dr. Hayes.
-              </h2>
-              <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
-                Your upcoming Care Match requires a brief symptom log update to
-                ensure a precise consultation.
-              </p>
+              <div className="relative z-10 flex flex-wrap items-center gap-3 md:gap-4 mt-auto">
+                {isLoading ? (
+                  <button
+                    className="bg-surface-container-lowest/70 text-primary/70 font-headline font-bold py-3 px-6 rounded shadow-sm cursor-wait flex items-center gap-2"
+                    disabled
+                    type="button"
+                  >
+                    Loading…
+                  </button>
+                ) : isError ? (
+                  <Link
+                    className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                    to="/symptom-check"
+                  >
+                    New symptom check
+                    <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                  </Link>
+                ) : latestSession ? (
+                  <>
+                    <Link
+                      className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                      to={`/symptom-check?session=${encodeURIComponent(latestSession.session_id)}`}
+                    >
+                      Open latest check
+                      <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                    </Link>
+                    <Link
+                      className="text-on-primary font-body font-medium hover:underline px-2 py-2"
+                      to="/symptom-check"
+                    >
+                      New symptom check
+                    </Link>
+                  </>
+                ) : (
+                  <Link
+                    className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                    to="/symptom-check"
+                  >
+                    Start symptom check
+                    <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                  </Link>
+                )}
+                <Link
+                  className="text-on-primary font-body font-medium hover:underline px-2 py-2"
+                  to="/medication-safety"
+                >
+                  Medications
+                </Link>
+              </div>
             </div>
-            <div className="relative z-10 flex items-center gap-4 mt-auto">
-              <button className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2">
-                Start Assessment
-                <span className="material-symbols-outlined text-lg">
-                  arrow_forward
-                </span>
-              </button>
-              <button className="text-on-primary font-body font-medium hover:underline px-2">
-                Reschedule
-              </button>
-            </div>
-          </div>
 
           {/* Health Snapshot */}
           <div className="col-span-1 md:col-span-12 lg:col-span-4 bg-surface-container-lowest rounded-xl p-6 shadow-ambient border-ghost flex flex-col gap-6">
-            <div className="flex items-center justify-between">
-              <h3 className="font-headline text-xl font-bold text-primary">
-                Health Snapshot
-              </h3>
-              <button className="text-outline hover:text-primary transition-colors">
-                <span className="material-symbols-outlined">more_horiz</span>
-              </button>
-            </div>
-
-            {/* Progress Ring */}
-            <div className="flex items-center justify-center py-4">
-              <div className="relative w-32 h-32 flex items-center justify-center">
-                <svg
-                  className="w-full h-full transform -rotate-90 absolute"
-                  viewBox="0 0 100 100"
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-headline text-xl font-bold text-primary">Health Snapshot</h3>
+                <Link
+                  aria-label="Open reports"
+                  className="text-outline hover:text-primary transition-colors p-1 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                  to="/reports"
                 >
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="45"
-                    fill="none"
-                    stroke="#f1f4f9"
-                    strokeWidth="8"
-                  />
-                  <circle
-                    cx="50"
-                    cy="50"
-                    r="45"
-                    fill="none"
-                    stroke="#00696d"
-                    strokeWidth="8"
-                    strokeDasharray="283"
-                    strokeDashoffset="56"
-                    className="drop-shadow-sm"
-                  />
-                </svg>
-                <div className="text-center flex flex-col items-center">
-                  <span className="font-headline text-3xl font-extrabold text-on-surface">
-                    82<span className="text-lg text-outline">%</span>
-                  </span>
-                  <span className="font-body text-xs text-on-surface-variant font-medium uppercase tracking-widest mt-1">
-                    Vitality
-                  </span>
-                </div>
+                  <span className="material-symbols-outlined">lab_profile</span>
+                </Link>
               </div>
-            </div>
 
-            {/* Mini Stats */}
-            <div className="flex flex-col gap-4 mt-auto">
-              <div className="flex items-start gap-4 p-3 bg-surface-container-low rounded-lg">
-                <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-[18px]">
-                    monitor_heart
-                  </span>
-                </div>
-                <div>
-                  <p className="font-body text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">
-                    Last Vitals
-                  </p>
-                  <p className="font-headline text-sm font-bold text-on-surface">
-                    BP: 120/80
-                    <span className="text-outline font-normal mx-1">|</span>
-                    HR: 72 bpm
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-start gap-4 p-3 bg-surface-container-low rounded-lg">
-                <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
-                  <span className="material-symbols-outlined text-[18px]">
-                    prescriptions
-                  </span>
-                </div>
-                <div className="flex-1">
-                  <p className="font-body text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">
-                    Active Meds
-                  </p>
-                  <div className="flex items-center justify-between">
-                    <p className="font-headline text-sm font-bold text-on-surface">
-                      Lisinopril 10mg
+              <div className="flex flex-col gap-4 mt-auto">
+                <div className="flex items-start gap-4 p-3 bg-surface-container-low rounded-lg min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[18px]">stethoscope</span>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-body text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">
+                      Last symptom check
                     </p>
-                    <span className="bg-surface-container-lowest text-secondary text-[10px] font-bold px-2 py-0.5 rounded-full border-ghost">
-                      On Track
-                    </span>
+                    {isLoading ? (
+                      <p className="font-body text-sm text-on-surface-variant">Loading…</p>
+                    ) : isError ? (
+                      <p className="font-body text-sm text-on-surface-variant">Unavailable</p>
+                    ) : latestSession ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                          <span
+                            className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${triageBadgeClasses(latestSession.triage_level)}`}
+                          >
+                            {triageLabel(latestSession.triage_level)}
+                          </span>
+                          <span className="font-body text-xs text-on-surface-variant">
+                            {formatSessionTimestamp(latestSession.created_at)}
+                          </span>
+                        </div>
+                        <p className="font-body text-sm text-on-surface line-clamp-2">
+                          {latestSession.summary.trim()
+                            ? latestSession.summary
+                            : "No summary for this session yet."}
+                        </p>
+                        <Link
+                          className="inline-flex items-center gap-0.5 font-body text-xs font-semibold text-primary mt-2 hover:underline"
+                          to={`/symptom-check?session=${encodeURIComponent(latestSession.session_id)}`}
+                        >
+                          Open session
+                          <span className="material-symbols-outlined text-sm">chevron_right</span>
+                        </Link>
+                      </>
+                    ) : (
+                      <>
+                        <p className="font-body text-sm text-on-surface-variant mb-2">
+                          No checks yet.
+                        </p>
+                        <Link
+                          className="inline-flex items-center gap-0.5 font-body text-xs font-semibold text-primary hover:underline"
+                          to="/symptom-check"
+                        >
+                          Start one
+                          <span className="material-symbols-outlined text-sm">chevron_right</span>
+                        </Link>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-4 p-3 bg-surface-container-low rounded-lg min-w-0">
+                  <div className="w-8 h-8 rounded-full bg-primary-fixed text-on-primary-fixed flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-[18px]">prescriptions</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-body text-xs font-semibold text-on-surface-variant uppercase tracking-wider mb-1">
+                      Active medications
+                    </p>
+                    {regimen.length ? (
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <MedicationNameHeading med={regimen[0]} size="list" />
+                          {regimen.length > 1 ? (
+                            <p className="font-body text-xs text-on-surface-variant mt-1">
+                              +{regimen.length - 1} more on file
+                            </p>
+                          ) : null}
+                        </div>
+                        <span className="bg-surface-container-lowest text-secondary text-[10px] font-bold px-2 py-0.5 rounded-full border-ghost shrink-0">
+                          On file
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="font-body text-sm text-on-surface-variant mb-2">
+                          None listed in this browser yet.
+                        </p>
+                        <Link
+                          className="inline-flex items-center gap-0.5 font-body text-xs font-semibold text-primary hover:underline"
+                          to="/medication-safety"
+                        >
+                          Add medications
+                          <span className="material-symbols-outlined text-sm">chevron_right</span>
+                        </Link>
+                      </>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
-          </div>
 
           {/* Past symptom triage sessions */}
           <div className="col-span-1 md:col-span-12">
