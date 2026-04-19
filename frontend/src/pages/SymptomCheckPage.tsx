@@ -1808,9 +1808,11 @@ const SymptomCheckPage: React.FC = () => {
               </h2>
               <div className="space-y-3 font-body text-sm leading-relaxed text-on-surface-variant">
                 <p>
-                  Labels can come from two places: diagnoses you add in{" "}
+                  Labels can come from two places: diagnoses you add on{" "}
                   <strong className="text-on-surface">My prior diagnoses</strong>, and official
-                  diagnoses you recorded after a visit on a past check (Post-visit Diagnosis).
+                  diagnoses you recorded after a visit on a past check (Post-visit Diagnosis)—not
+                  the AI&apos;s illustrative list from that check, but what you entered as the real
+                  diagnosis after seeing a clinician.
                 </p>
                 <p>
                   If you turn this option on, those saved labels are sent to the{" "}
@@ -1911,9 +1913,9 @@ const SymptomCheckPage: React.FC = () => {
                 Welcome to Symptom Check
               </h2>
               <p className="mb-6 max-w-2xl font-body text-sm leading-relaxed text-on-surface-variant md:text-base">
-                This is a structured, three-part guided assessment that helps you 
-                organize what you are experiencing so you can discuss it with a clinician 
-                or care team. This is not a diagnosis or emergency triage.
+                This is a structured, three-part guided assessment—not a diagnosis and
+                not emergency triage. It helps you organize what you are experiencing so
+                you can discuss it with a clinician or care team.
               </p>
               <ul className="mb-8 space-y-4 font-body text-sm text-on-surface md:text-base">
                 <li className="flex gap-3">
@@ -1929,8 +1931,8 @@ const SymptomCheckPage: React.FC = () => {
                     </p>
                     <p className="mt-1 leading-relaxed text-on-surface-variant">
                       Describe your symptoms, choose an insurer for illustrative cost
-                      context, and enter a US address so we can find nearby facilities to 
-                      address your needs.
+                      context, and enter a US address so we can rank nearby facilities
+                      from the public NPI directory.
                     </p>
                   </div>
                 </li>
@@ -1965,8 +1967,8 @@ const SymptomCheckPage: React.FC = () => {
                     </p>
                     <p className="mt-1 leading-relaxed text-on-surface-variant">
                       You will see possible conditions for discussion only, nearby
-                      hospital listings, and general price context. This is not 
-                      a personal quote or medical decision.
+                      hospital-style listings, and general price context—not a personal
+                      quote or medical decision.
                     </p>
                   </div>
                 </li>
@@ -2198,7 +2200,7 @@ const SymptomCheckPage: React.FC = () => {
                   errors={addressValidation.errors}
                   idPrefix="addr"
                   legend="Current address"
-                  description="Used to find nearby facilities for your situation. US addresses only."
+                  description="Used to rank nearby facilities for your situation. US addresses only (NPPES directory)."
                   setAddressFieldBlurred={setAddressFieldBlurred}
                   setUserAddress={setUserAddress}
                   showRequiredMarkers
