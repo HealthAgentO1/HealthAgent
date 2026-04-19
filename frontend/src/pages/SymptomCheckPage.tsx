@@ -125,6 +125,8 @@ const SymptomCheckPage: React.FC = () => {
   const [secondFollowUpQuestions, setSecondFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [secondFollowUpAnswers, setSecondFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
+  // Django session ID from first LLM call; required for condition assessment.
+  const [sessionId, setSessionId] = useState<string | null>(null);
   // Serializes Continue / See results while `requestFollowUpQuestions` or `requestConditionAssessment` runs.
   const [pendingRequest, setPendingRequest] = useState<null | "followup" | "followup_round_2" | "results">(null);
   const [llmError, setLlmError] = useState<string | null>(null);
@@ -153,6 +155,7 @@ const SymptomCheckPage: React.FC = () => {
       });
       setFollowUpQuestions(data.questions);
       setFollowUpAnswers(buildInitialAnswers(data.questions));
+      setSessionId(data.session_id);
       setResults(null);
       setStep("followup");
     } catch (err) {
@@ -189,6 +192,7 @@ const SymptomCheckPage: React.FC = () => {
             symptoms: symptoms.trim(),
             insuranceLabel: insurerLabel,
             followUpAnswers: structured,
+            sessionId: sessionId || "",
           });
           setResults(payload);
           setStep("results");
@@ -235,6 +239,7 @@ const SymptomCheckPage: React.FC = () => {
         symptoms: symptoms.trim(),
         insuranceLabel: insurerLabel,
         followUpAnswers: allAnswers,
+        sessionId: sessionId || "",
       });
       setResults(payload);
       setStep("results");
@@ -254,6 +259,7 @@ const SymptomCheckPage: React.FC = () => {
     setSecondFollowUpQuestions([]);
     setSecondFollowUpAnswers({});
     setResults(null);
+    setSessionId(null);
     setLlmError(null);
     setPendingRequest(null);
   };
