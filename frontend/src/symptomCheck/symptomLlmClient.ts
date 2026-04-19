@@ -7,6 +7,7 @@
  */
 import axios from "axios";
 import followupContext from "./prompts/followup_context.txt?raw";
+import followupRound2Context from "./prompts/followup_round2_context.txt?raw";
 import resultsContext from "./prompts/results_context.txt?raw";
 import { apiClient } from "../api/client";
 import { parseJsonObjectFromLlm } from "./parseLlmJson";
@@ -70,6 +71,27 @@ export async function requestFollowUpQuestions(input: {
     user_payload: {
       symptoms: input.symptoms,
       insurance_label: input.insuranceLabel,
+    },
+  };
+
+  const raw = await postSymptomSurveyLlm(body);
+  const parsed = parseJsonObjectFromLlm(raw);
+  return validateFollowUpQuestionsPayload(parsed);
+}
+
+/** Second round of follow-up questions: based on first round answers to narrow further. */
+export async function requestSecondFollowUpQuestions(input: {
+  symptoms: string;
+  insuranceLabel: string;
+  firstRoundAnswers: StructuredFollowUpAnswer[];
+}): Promise<FollowUpQuestionsPayload> {
+  const body: SymptomLlmRequestBody = {
+    phase: "followup_questions_round_2",
+    system_prompt: followupRound2Context.trim(),
+    user_payload: {
+      symptoms: input.symptoms,
+      insurance_label: input.insuranceLabel,
+      first_round_answers: input.firstRoundAnswers,
     },
   };
 

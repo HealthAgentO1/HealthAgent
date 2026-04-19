@@ -31,7 +31,9 @@ class SymptomSurveyLlmSerializer(serializers.Serializer):
     `frontend/src/symptomCheck/prompts/*.txt` plus JSON user_payload for the model.
     """
 
-    phase = serializers.ChoiceField(choices=["followup_questions", "condition_assessment"])
+    phase = serializers.ChoiceField(
+        choices=["followup_questions", "followup_questions_round_2", "condition_assessment"]
+    )
     system_prompt = serializers.CharField(min_length=1, max_length=200_000)
     user_payload = serializers.JSONField()
 
