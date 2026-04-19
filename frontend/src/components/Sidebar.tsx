@@ -107,7 +107,12 @@ const Sidebar: React.FC = () => {
               </span>
             </NavLink>
           </div>
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2.5 text-right">
+          <NavLink
+            to="/"
+            end
+            aria-label="Go to dashboard"
+            className="flex min-w-0 flex-1 items-center justify-end gap-2.5 rounded-lg text-right outline-none ring-primary/40 transition-colors hover:bg-surface-container-high/60 focus-visible:ring-2"
+          >
             <div className="min-w-0">
               <p className="font-headline text-base font-extrabold leading-tight tracking-tight text-primary">
                 HealthOS
@@ -123,7 +128,7 @@ const Sidebar: React.FC = () => {
               height={36}
               className="size-9 shrink-0 rounded-lg object-contain shadow-[0_4px_12px_rgba(24,28,32,0.12)]"
             />
-          </div>
+          </NavLink>
         </header>
 
         {mobileOpen ? (
@@ -186,7 +191,12 @@ const Sidebar: React.FC = () => {
 
       <aside className="hidden h-screen w-72 shrink-0 flex-col gap-y-2 bg-surface-container-low px-4 py-8 md:flex">
         {/* Brand */}
-        <div className="mb-8 flex items-center gap-3 px-4">
+        <NavLink
+          to="/"
+          end
+          aria-label="Go to dashboard"
+          className="mb-8 flex items-center gap-3 rounded-xl px-4 py-2 outline-none ring-primary/40 transition-colors hover:bg-surface-container-high/50 focus-visible:ring-2 -mx-1"
+        >
           <img
             src="/icon.png"
             alt=""
@@ -200,7 +210,7 @@ const Sidebar: React.FC = () => {
             </h1>
             <p className="mt-1 text-xs font-medium text-on-surface-variant">Clinical Sanctuary</p>
           </div>
-        </div>
+        </NavLink>
 
         {/* Navigation */}
         <nav className="flex flex-1 flex-col gap-1 font-headline font-semibold">

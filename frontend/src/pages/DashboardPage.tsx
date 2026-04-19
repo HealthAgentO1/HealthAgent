@@ -405,11 +405,11 @@ const DashboardPage: React.FC = () => {
                   const deletingThis =
                     deleteSession.isPending && deleteSession.variables === s.session_id;
                   return (
-                    <li key={s.session_id} className="group">
-                      <div className="flex items-stretch rounded-xl shadow-ambient border-ghost bg-surface-container-lowest hover:bg-surface-bright transition-colors duration-200 overflow-hidden focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 focus-within:ring-offset-surface-container-lowest">
+                    <li key={s.session_id}>
+                      <div className="group relative rounded-xl shadow-ambient border-ghost bg-surface-container-lowest hover:bg-surface-bright transition-colors duration-200 overflow-hidden focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 focus-within:ring-offset-surface-container-lowest">
                         <Link
                           aria-label={`Open symptom session from ${formatSessionTimestamp(s.created_at)}`}
-                          className="flex flex-1 min-w-0 flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-5 md:p-6 outline-none"
+                          className="flex min-w-0 flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-5 pr-14 md:p-6 md:pr-16 outline-none"
                           to={`/symptom-check?session=${encodeURIComponent(s.session_id)}`}
                         >
                           <div className="flex items-start gap-4 min-w-0 flex-1">
@@ -441,23 +441,29 @@ const DashboardPage: React.FC = () => {
                             </div>
                           </div>
                         </Link>
-                        <div className="flex items-center shrink-0 border-l border-outline-variant/20 bg-surface-container-lowest group-hover:bg-surface-bright pl-1 pr-2 md:pr-3">
-                          <button
-                            type="button"
-                            className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-error/40 bg-error/10 text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"
-                            aria-label="Delete this symptom check"
-                            disabled={deletingThis}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              setConfirmDeleteSessionId(s.session_id);
-                            }}
+                        <button
+                          type="button"
+                          className="absolute inset-y-2 right-2 z-10 flex cursor-pointer items-center justify-center rounded-md text-error outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label="Delete this symptom check"
+                          disabled={deletingThis}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setConfirmDeleteSessionId(s.session_id);
+                          }}
+                        >
+                          <span
+                            className={`inline-flex items-center justify-center rounded-lg border border-error/35 bg-error/10 p-1.5 shadow-sm transition-opacity duration-150 ${
+                              deletingThis
+                                ? "opacity-100"
+                                : "opacity-0 max-md:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                            }`}
                           >
                             <span className="material-symbols-outlined text-[22px]" aria-hidden>
                               delete
                             </span>
-                          </button>
-                        </div>
+                          </span>
+                        </button>
                       </div>
                     </li>
                   );
