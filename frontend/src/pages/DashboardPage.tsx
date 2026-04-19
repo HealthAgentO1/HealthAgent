@@ -505,7 +505,7 @@ const DashboardPage: React.FC = () => {
                             </div>
                           </div>
                         </Link>
-                        <div className="flex items-center shrink-0 border-l border-outline-variant/20 bg-surface-container-lowest group-hover:bg-surface-bright pl-1 pr-2 md:pr-3">
+                        <div className="flex items-center shrink-0 bg-surface-container-lowest group-hover:bg-surface-bright pl-1 pr-2 md:pr-3">
                           <button
                             type="button"
                             className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-error/40 bg-error/10 text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"

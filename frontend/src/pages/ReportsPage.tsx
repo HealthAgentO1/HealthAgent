@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import { useSymptomSessions, type SymptomSessionListItem } from "../api/queries";
+import {
+  useDeleteSymptomSession,
+  useSymptomSessions,
+  type SymptomSessionListItem,
+} from "../api/queries";
 import {
   buildPatientFriendlyPreVisit,
   type PatientFriendlyPreVisit,
@@ -61,9 +65,11 @@ type ReportsLocationState = { scrollToTop?: boolean };
 const ReportsPage: React.FC = () => {
   const location = useLocation();
   const { data: sessions, isLoading, isError, error, refetch, isFetching } = useSymptomSessions();
+  const deleteSession = useDeleteSymptomSession();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("session");
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
   /** Tracks a single refetch attempt when `?session=` is not yet in the cached list (e.g. right after a new check). */
   const pendingSessionRefetchRef = useRef<string | null>(null);
 
@@ -78,7 +84,10 @@ const ReportsPage: React.FC = () => {
 
   useEffect(() => {
     if (isLoading) return;
-    if (!ordered.length) return;
+    if (!ordered.length) {
+      setSearchParams({}, { replace: true });
+      return;
+    }
 
     const hasSelected = Boolean(selectedId && ordered.some((s) => s.session_id === selectedId));
     if (hasSelected) {
@@ -99,6 +108,11 @@ const ReportsPage: React.FC = () => {
 
     setSearchParams({ session: ordered[0].session_id }, { replace: true });
   }, [ordered, selectedId, isLoading, setSearchParams, refetch]);
+
+  const confirmDeleteSession =
+    confirmDeleteSessionId && sessions
+      ? sessions.find((s) => s.session_id === confirmDeleteSessionId)
+      : undefined;
 
   const selected = ordered.find((s) => s.session_id === selectedId) ?? null;
   const patientView = selected
@@ -134,6 +148,57 @@ const ReportsPage: React.FC = () => {
 
   return (
     <div className="p-6 md:p-10 lg:p-12">
+      {confirmDeleteSessionId ? (
+        <div
+          aria-labelledby="delete-report-title"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          role="dialog"
+        >
+          <div className="bg-surface-container-lowest rounded-xl shadow-xl max-w-md w-full p-6 md:p-8 border border-outline-variant/20">
+            <h2
+              className="text-xl font-headline font-bold text-primary mb-2"
+              id="delete-report-title"
+            >
+              Delete this report?
+            </h2>
+            <p className="text-sm text-on-surface-variant font-body mb-6">
+              {confirmDeleteSession ? (
+                <>
+                  The report from{" "}
+                  <span className="font-medium text-on-surface">
+                    {formatSessionTimestamp(confirmDeleteSession.created_at)}
+                  </span>{" "}
+                  will be removed from your history. You will not be able to recover it.
+                </>
+              ) : (
+                <>This report will be removed. You will not be able to recover it.</>
+              )}
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                className="cursor-pointer bg-error text-on-error px-6 py-3 rounded-lg font-headline font-semibold text-sm hover:bg-[#93000a] transition-colors sm:flex-1"
+                onClick={() => {
+                  const id = confirmDeleteSessionId;
+                  setConfirmDeleteSessionId(null);
+                  if (id) deleteSession.mutate(id);
+                }}
+                type="button"
+              >
+                Delete
+              </button>
+              <button
+                className="cursor-pointer px-6 py-3 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors sm:flex-1"
+                onClick={() => setConfirmDeleteSessionId(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="max-w-6xl mx-auto space-y-8">
         <header>
           <h1 className="font-headline text-4xl md:text-[3rem] leading-none font-bold text-primary tracking-tight mb-2">
@@ -175,6 +240,16 @@ const ReportsPage: React.FC = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(240px,300px)_1fr] gap-6 lg:gap-10 items-start">
+            {deleteSession.isError ? (
+              <div
+                className="lg:col-span-2 rounded-xl border border-error-container/40 bg-error-container/10 px-4 py-3 font-body text-sm text-on-error-container"
+                role="alert"
+              >
+                {deleteSession.error instanceof Error
+                  ? deleteSession.error.message
+                  : "Could not delete that report. Try again."}
+              </div>
+            ) : null}
             <nav
               aria-label="Past symptom checks"
               className="rounded-xl border border-ghost bg-surface-container-lowest shadow-ambient overflow-hidden"
@@ -187,12 +262,14 @@ const ReportsPage: React.FC = () => {
               <ul className="max-h-[min(70vh,520px)] overflow-y-auto divide-y divide-outline-variant/15">
                 {ordered.map((s: SymptomSessionListItem) => {
                   const isActive = s.session_id === selectedId;
+                  const deletingThis =
+                    deleteSession.isPending && deleteSession.variables === s.session_id;
                   return (
-                    <li key={s.session_id}>
+                    <li key={s.session_id} className="group relative flex items-stretch">
                       <button
                         type="button"
                         onClick={() => selectSession(s.session_id)}
-                        className={`w-full cursor-pointer text-left px-4 py-3.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary ${
+                        className={`flex-1 min-w-0 cursor-pointer text-left pl-4 pr-11 py-3.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary ${
                           isActive
                             ? "bg-primary-fixed/12 border-l-[3px] border-l-primary"
                             : "border-l-[3px] border-l-transparent hover:bg-surface-container-high/80"
@@ -211,6 +288,29 @@ const ReportsPage: React.FC = () => {
                         <p className="font-headline text-sm font-semibold text-on-surface leading-snug line-clamp-2">
                           {patientCheckListLabel(s)}
                         </p>
+                      </button>
+                      <button
+                        type="button"
+                        className="absolute inset-y-1 right-1 z-10 flex cursor-pointer items-center justify-center rounded-md text-error outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error disabled:cursor-not-allowed disabled:opacity-50"
+                        aria-label="Delete this report"
+                        disabled={deletingThis}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setConfirmDeleteSessionId(s.session_id);
+                        }}
+                      >
+                        <span
+                          className={`inline-flex items-center justify-center rounded-lg border border-error/35 bg-error/10 p-1.5 shadow-sm transition-opacity duration-150 ${
+                            deletingThis
+                              ? "opacity-100"
+                              : "opacity-0 max-md:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-[20px]" aria-hidden>
+                            delete
+                          </span>
+                        </span>
                       </button>
                     </li>
                   );
@@ -253,6 +353,17 @@ const ReportsPage: React.FC = () => {
                         Open in Symptom Check
                         <span className="material-symbols-outlined text-lg leading-none">arrow_forward</span>
                       </Link>
+                      <button
+                        type="button"
+                        disabled={
+                          deleteSession.isPending && deleteSession.variables === selected.session_id
+                        }
+                        onClick={() => setConfirmDeleteSessionId(selected.session_id)}
+                        className="inline-flex items-center gap-2 font-body text-sm font-semibold text-error border border-error/40 bg-error/10 rounded-lg py-2 px-4 hover:bg-error/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">delete</span>
+                        Delete report
+                      </button>
                     </div>
                   </div>
 

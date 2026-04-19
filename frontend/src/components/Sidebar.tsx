@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 const navItems = [
@@ -109,7 +109,11 @@ const Sidebar: React.FC = () => {
               </span>
             </NavLink>
           </div>
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2.5 text-right">
+          <Link
+            to="/"
+            className="flex min-w-0 flex-1 items-center justify-end gap-2.5 text-right rounded-lg outline-none transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+            aria-label="HealthOS — go to dashboard"
+          >
             <div className="min-w-0">
               <p className="font-headline text-base font-extrabold leading-tight tracking-tight text-primary">
                 HealthOS
@@ -125,7 +129,7 @@ const Sidebar: React.FC = () => {
               height={36}
               className="size-9 shrink-0 rounded-lg object-contain shadow-[0_4px_12px_rgba(24,28,32,0.12)]"
             />
-          </div>
+          </Link>
         </header>
 
         {mobileOpen ? (
@@ -188,7 +192,11 @@ const Sidebar: React.FC = () => {
 
       <aside className="hidden h-screen w-72 shrink-0 flex-col gap-y-2 bg-surface-container-low px-4 py-8 md:flex">
         {/* Brand */}
-        <div className="mb-8 flex items-center gap-3 px-4">
+        <Link
+          to="/"
+          className="mb-8 flex items-center gap-3 px-4 rounded-lg outline-none transition-opacity hover:opacity-90 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+          aria-label="HealthOS — go to dashboard"
+        >
           <img
             src="/icon.png"
             alt=""
@@ -202,7 +210,7 @@ const Sidebar: React.FC = () => {
             </h1>
             <p className="mt-1 text-xs font-medium text-on-surface-variant">Clinical Sanctuary</p>
           </div>
-        </div>
+        </Link>
 
         {/* Navigation */}
         <nav className="flex flex-1 flex-col gap-1 font-headline font-semibold">
