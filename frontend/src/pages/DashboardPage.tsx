@@ -459,7 +459,8 @@ const DashboardPage: React.FC = () => {
                     deleteSession.isPending && deleteSession.variables === s.session_id;
                   return (
                     <li key={s.session_id} className="group">
-                      <div className="flex items-stretch rounded-xl shadow-ambient border-ghost bg-surface-container-lowest hover:bg-surface-bright transition-colors duration-200 overflow-hidden focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 focus-within:ring-offset-surface-container-lowest">
+                      <div className="overflow-hidden rounded-xl border-ghost bg-surface-container-lowest shadow-ambient transition-colors duration-200 focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 focus-within:ring-offset-surface-container-lowest hover:bg-surface-bright">
+                        <div className="flex items-stretch">
                         <Link
                           aria-label={`Open symptom session from ${formatSessionTimestamp(s.created_at)}`}
                           className="flex flex-1 min-w-0 flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-5 md:p-6 outline-none"
@@ -521,6 +522,19 @@ const DashboardPage: React.FC = () => {
                             </span>
                           </button>
                         </div>
+                        </div>
+                        {!postVisitDx ? (
+                          <div className="border-t border-outline-variant/20 bg-surface-container-low/50 px-5 py-3 md:px-6">
+                            <Link
+                              className="inline-flex items-center gap-1.5 font-headline text-xs font-semibold text-primary hover:underline"
+                              to={`/after-visit/${encodeURIComponent(s.session_id)}`}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span className="material-symbols-outlined text-base">clinical_notes</span>
+                              Record clinician diagnosis after visit
+                            </Link>
+                          </div>
+                        ) : null}
                       </div>
                     </li>
                   );

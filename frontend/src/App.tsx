@@ -8,6 +8,7 @@ import MedicationSafetyPage from "./pages/MedicationSafetyPage";
 import MedicationSafetyDetailPage from "./pages/MedicationSafetyDetailPage";
 import ReportsPage from "./pages/ReportsPage";
 import EmergencyContactPage from "./pages/EmergencyContactPage";
+import AfterVisitPage from "./pages/AfterVisitPage";
 import PriorDiagnosesPage from "./pages/PriorDiagnosesPage";
 import SettingsProfilePage from "./pages/SettingsProfilePage";
 import LoginPage from "./pages/LoginPage";
@@ -31,6 +32,7 @@ function App() {
           <Route path="/medication-safety" element={<MedicationSafetyPage />} />
           <Route path="/medication-safety/med/:medicationId" element={<MedicationSafetyDetailPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/after-visit/:sessionId" element={<AfterVisitPage />} />
           <Route path="/settings" element={<SettingsProfilePage />} />
           <Route path="/emergency" element={<EmergencyContactPage />} />
         </Route>

@@ -7,8 +7,21 @@ import { parsePostVisitDiagnosis } from "./postVisitDiagnosisTypes";
  * follow-up LLM call (`prior_official_diagnoses` on `user_payload`).
  */
 export function uniquePriorOfficialDiagnoses(sessions: SymptomSessionListItem[]): string[] {
+  return postVisitDiagnosisListFromSessions(sessions).map((r) => r.text);
+}
+
+/** One row per unique post-visit label (first occurrence wins; `sessions` should be newest-first). */
+export type PostVisitDiagnosisListItem = {
+  text: string;
+  session_id: string;
+  created_at: string;
+};
+
+export function postVisitDiagnosisListFromSessions(
+  sessions: SymptomSessionListItem[],
+): PostVisitDiagnosisListItem[] {
   const seen = new Set<string>();
-  const out: string[] = [];
+  const out: PostVisitDiagnosisListItem[] = [];
   for (const s of sessions) {
     const p = parsePostVisitDiagnosis(s.post_visit_diagnosis ?? null);
     if (!p?.text) continue;
@@ -17,7 +30,11 @@ export function uniquePriorOfficialDiagnoses(sessions: SymptomSessionListItem[])
     const key = t.toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push(t);
+    out.push({
+      text: t,
+      session_id: s.session_id,
+      created_at: s.created_at,
+    });
   }
   return out;
 }
