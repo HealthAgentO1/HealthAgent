@@ -1,17 +1,17 @@
 # API contract — Feature 1 (Symptom-to-Care)
 
 **Status:** Draft (pre-implementation)  
-**Version:** 1.0.6  
+**Version:** 1.0.9  
 **Base URL (dev):** `http://127.0.0.1:8000/api`  
 **Primary consumer:** React frontend (`VITE_API_URL` + Axios)
 
-This document defines the HTTP contract for the symptom interview, triage submission, and NPPES-backed provider search. Backend implementations MUST preserve these paths, HTTP methods, and JSON field names unless the team agrees on a versioned revision.
+This document defines the HTTP contract for the Symptom Check survey LLM, session APIs, and NPPES-backed facility search. **There is no `POST /symptom/triage/` route** in the current Django URLconf; urgency, routing hints, and transcript persistence are handled as described in section 3. Backend implementations MUST preserve implemented paths, HTTP methods, and JSON field names unless the team agrees on a versioned revision.
 
 **Related:** Domain behavior and data model context live in [sympton-to-care.md](./sympton-to-care.md).
 
 **Session history & post-visit diagnosis:** Authenticated **`GET /api/sessions/`** returns each row’s **`post_visit_diagnosis`** (nullable JSON). **`GET /api/sessions/<uuid>/`** returns the resume payload including **`post_visit_diagnosis`**. **`PATCH /api/sessions/<uuid>/`** accepts **`{ "post_visit_diagnosis": { ... } }`** or **`null`** to clear; the response body matches **`GET`** (full resume payload). See section 6.
 
-**Symptom Check survey LLM:** The `/symptom-check` UI issues one or more `POST /api/symptom/survey-llm/` calls (authenticated): follow-up question generation (one or two rounds), then condition assessment. The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; on **`condition_assessment`** it also sends **`active_medications`** (the browser active regimen: names plus optional dosage, frequency, time, refill) for pre-visit reporting. Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from `POST /symptom/chat/` (conversational JSON contract below).
+**Symptom Check survey LLM:** The `/symptom-check` UI issues one or more `POST /api/symptom/survey-llm/` calls (authenticated): follow-up question generation (one or two rounds), condition assessment, and optionally **`price_estimate_context`**. The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; in **production** the server may **ignore** `system_prompt` and use **`api/prompts/survey/`** keyed by **`phase`** (see **Implementation notes** in section 1). On **`condition_assessment`** the client also sends **`active_medications`** (the browser active regimen: names plus optional dosage, frequency, time, refill) for pre-visit reporting. Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from **`POST /symptom/chat/`** (section 2), which is **internal / future use** — implemented and tested in Django but **not** called by the current React app.
 
 **Symptom Check nearby facilities:** After the second LLM call, the SPA issues **`POST /api/symptom/nearby-facilities/`** with the user’s address and NUCC `taxonomy_codes` from `care_taxonomy` (see section 4).
 
@@ -23,7 +23,7 @@ This document defines the HTTP contract for the symptom interview, triage submis
 |------|------|
 | Format | `Content-Type: application/json` on bodies |
 | Paths | All paths below are relative to the API prefix `/api/` (e.g. full path `POST /api/symptom/chat/`) |
-| Auth | JWT: clients send `Authorization: Bearer <access_token>` when present. **`POST /symptom/survey-llm/`**, **`POST /symptom/nearby-facilities/`**, and **`POST /symptom/chat/`** require authentication in the current implementation. |
+| Auth | JWT: clients send `Authorization: Bearer <access_token>` when present. **`POST /symptom/survey-llm/`**, **`POST /symptom/nearby-facilities/`**, and **`POST /symptom/chat/`** (internal / future; see section 2) require authentication in the current implementation. |
 | IDs | `session_id` is a UUID string |
 | Timestamps | ISO-8601 UTC strings where present (e.g. `2026-04-18T12:34:56Z`) |
 
@@ -62,7 +62,16 @@ Validation and request errors use HTTP **400**; not found **404**; server errors
 
 **`POST /symptom/survey-llm/`**
 
-Runs one **stateless** survey turn for the React Symptom Check flow: either generating follow-up questions from intake data, or generating condition assessment JSON after follow-ups. The server calls the configured LLM with the provided `system_prompt` and a single synthetic user message whose content is `JSON.stringify(user_payload)`.
+Runs one **stateless** survey turn for the React Symptom Check flow: follow-up questions, optional second round, condition assessment, or price-estimate context. The server calls the configured LLM with a **system** instruction (client-supplied or server-loaded per settings) and a single synthetic user message whose content is `JSON.stringify(user_payload)`.
+
+### Implementation notes (server behavior)
+
+| Topic | Behavior |
+|-------|----------|
+| **System prompt source** | If **`SYMPTOM_SURVEY_USE_SERVER_PROMPTS`** is **True** (default when `DEBUG` is False), the server loads text from **`api/prompts/survey/`** by **`phase`** and **ignores** the request body’s **`system_prompt`**. If **False** (typical local dev), **`system_prompt`** from the client is used. |
+| **Payload limits** | **`system_prompt`** length and serialized **`user_payload`** size are capped (`SYMPTOM_SURVEY_MAX_SYSTEM_PROMPT_CHARS`, `SYMPTOM_SURVEY_MAX_USER_PAYLOAD_BYTES` in settings). Oversized bodies yield **400**. |
+| **Rate limit** | Authenticated requests use DRF **scoped throttling** (`symptom_survey_llm`); exceeding the limit yields **429**. |
+| **LLM errors** | Distinct responses: **503** for missing API keys, transport/timeouts, and rate limits; **502** for upstream API failures and invalid/empty model output. Logs include **user id** and **phase**, not raw prompts or payloads. |
 
 ### Request
 
@@ -80,9 +89,9 @@ Runs one **stateless** survey turn for the React Symptom Check flow: either gene
 
 | Field | Type | Required | Notes |
 |-------|------|----------|--------|
-| `phase` | string | yes | `followup_questions` \| `followup_questions_round_2` \| `condition_assessment` (echoed in response for debugging) |
-| `system_prompt` | string | yes | Non-empty; in production the SPA bundles known-good templates |
-| `user_payload` | object | yes | JSON object. **`followup_questions`** may include **`prior_official_diagnoses`**: a string array of patient-recorded official diagnoses from past sessions (`SymptomSession.post_visit_diagnosis`), when the SPA opt-in is enabled. **`condition_assessment`** payloads include `symptoms`, `insurance_label`, `follow_up_answers`, and **`active_medications`** (array of objects: at minimum `name`; optional `dosage_mg`, `frequency`, `time_to_take`, `refill_before`, `common_name`, `scientific_name`) so the backend can attach the same regimen to the pre-visit report. |
+| `phase` | string | yes | `followup_questions` \| `followup_questions_round_2` \| `condition_assessment` \| `price_estimate_context` (echoed in response) |
+| `system_prompt` | string | yes | Non-empty in the contract; **may be ignored** when server-side prompts are enabled (see table above). Max length enforced by the API. |
+| `user_payload` | object | yes | JSON object; serialized size capped. **`followup_questions`** may include **`prior_official_diagnoses`**: a string array of patient-recorded official diagnoses from past sessions (`SymptomSession.post_visit_diagnosis`), when the SPA opt-in is enabled. **`condition_assessment`** payloads include `symptoms`, `insurance_label`, `follow_up_answers`, and **`active_medications`** (array of objects: at minimum `name`; optional `dosage_mg`, `frequency`, `time_to_take`, `refill_before`, `common_name`, `scientific_name`) so the backend can attach the same regimen to the pre-visit report. |
 | `session_id` | string (UUID) \| null | no | Omit or null on the first survey turn; set to the previously returned `session_id` on later turns so all survey steps share one `SymptomSession`. |
 
 ### Response **200 OK**
@@ -124,18 +133,21 @@ Runs one **stateless** survey turn for the React Symptom Check flow: either gene
 
 | HTTP | When |
 |------|------|
-| **400** | Serializer validation (e.g. invalid `phase`, empty `system_prompt`) |
+| **400** | Serializer validation (e.g. invalid `phase`, empty `system_prompt`, **`user_payload` too large**) |
 | **401** | Missing or invalid JWT |
-| **502** | Upstream LLM or transport failure |
-| **503** | LLM not configured (e.g. missing API key) |
+| **429** | Authenticated user exceeded the survey LLM **rate limit** for this scope |
+| **502** | Upstream LLM API error, invalid/empty model output, or other non-transport failure |
+| **503** | LLM not configured (e.g. missing API key), **transport** failure (cannot reach provider), or **provider rate limit** (retry later) |
 
 ---
 
-## 2. Symptom chat turn
+## 2. Symptom chat turn (internal / future)
+
+**Status:** **Internal / future use.** The backend implements **`POST /symptom/chat/`** with tests; the production SPA does **not** call it today. Contract below is retained for a possible conversational interview UI or tooling.
 
 **`POST /symptom/chat/`**
 
-Runs one conversational turn: persists (or creates) a symptom session, appends the user message, returns the model’s reply. Intended for the live interview UI.
+Runs one conversational turn: persists (or creates) a symptom session, appends the user message, returns the model’s reply.
 
 ### Request
 
@@ -166,96 +178,33 @@ Runs one conversational turn: persists (or creates) a symptom session, appends t
 
 | Field | Type | Notes |
 |-------|------|--------|
-| `session_id` | string (UUID) | Stable for subsequent turns and for `POST /symptom/triage/` |
+| `session_id` | string (UUID) | Stable for subsequent chat turns; the shipped API has **no** separate triage POST (see section 3) |
 | `assistant_message` | string | Markdown allowed only if the UI explicitly supports it; default is plain text |
 | `turn_index` | integer | Monotonic count of completed assistant turns (optional but useful for QA) |
-| `interview_complete` | boolean | When `true`, UI SHOULD prompt the user to submit triage (still use `POST /symptom/triage/` for structured result) |
+| `interview_complete` | boolean | When `true`, the chat view may generate a **`pre_visit_report`** on the server; the React app does not use this endpoint today |
 | `created_at` | string | Session creation time |
 | `updated_at` | string | Last update time |
 
 ---
 
-## 3. Triage submission
+## 3. Triage, routing, disclaimers, and transcript (no dedicated endpoint)
 
-**`POST /symptom/triage/`**
+**`POST /symptom/triage/` is not implemented.** It does not appear in `api/urls.py`. The draft request/response shape that used to live in this section of the contract is **not** exposed over HTTP.
 
-Submits the **full session** for structured triage: urgency, routing guidance, and **provider recommendations**. The canonical source of truth for the conversation is server-side history keyed by `session_id`; the request only needs identifiers and location context for provider search.
+The **Symptom Check** flow (`/symptom-check`) implements the same product concerns across **`POST /symptom/survey-llm/`**, session rows, and **`POST /symptom/nearby-facilities/`**:
 
-### Request
+| Concern | How the system handles it today |
+|--------|----------------------------------|
+| **Structured urgency (`triage_level`)** | After **`phase: "condition_assessment"`**, Django parses the LLM’s JSON (`raw_text` in the survey response). Server-side logic maps **`overall_patient_severity`** to **`SymptomSession.triage_level`** (`emergency` \| `urgent` \| `routine`) and persists survey turns on the session. The HTTP response is still **`{ "raw_text", "phase", "session_id" }`** — clients parse `raw_text` for conditions, severity, **`care_taxonomy`**, etc. |
+| **Routing / “where to go”** | The SPA reads **`care_taxonomy`** (and related fields) from parsed `raw_text` for copy and for **`POST /symptom/nearby-facilities/`** (`taxonomy_codes`, `suggested_care_setting`). There is no separate **`routing_summary`** JSON field from a triage endpoint. |
+| **Provider / facility discovery** | **`POST /symptom/nearby-facilities/`** (section 4) returns ranked **facilities** from NPPES + Census — not a `provider_recommendations.specialties` object from a triage POST. |
+| **Disclaimers** | Non-diagnostic and emergency copy is **static UI text** in the React app, not an API-returned `disclaimers[]` array. |
+| **Pre-visit summary** | After a successful **`condition_assessment`** turn, the server may build and store **`SymptomSession.pre_visit_report`** (see [sympton-to-care.md](./sympton-to-care.md) § Pre-Visit Report Format). It is returned on **`GET /api/sessions/`** (history list). **`GET /api/sessions/<uuid>/`** returns the **resume** payload for the wizard (`results_raw_text`, `triage_level`, …) and does **not** include `pre_visit_report` in the current API shape. |
+| **Transcript / snapshot** | Survey history is **`SymptomSession.ai_conversation_log`** (`survey_turn` entries with `phase`, `user_payload`, `raw_text`). **`GET /api/sessions/<uuid>/`** returns the **resume payload** for the SPA (not a chat `messages[]` array from a triage endpoint). |
 
-```json
-{
-  "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "zip": "94107"
-}
-```
+**Conversational chat** (`POST /symptom/chat/`, section 2 — internal / future) returns **`triage_level`** per assistant turn and may set **`pre_visit_report`** when **`interview_complete`** is true; there is still **no** separate triage submission route.
 
-| Field | Type | Required | Notes |
-|-------|------|----------|--------|
-| `session_id` | string (UUID) | yes | Must reference an existing session with at least one user message |
-| `zip` | string | yes | US ZIP (5 digits) or ZIP+4; used for NPPES-backed provider discovery |
-
-**Optional extension (only if product requires offline / replay):**
-
-| Field | Type | Required | Notes |
-|-------|------|----------|--------|
-| `conversation` | array | no | If present, MAY override stored server history for this request only; same shape as `messages` in response below |
-
-### Response **200 OK**
-
-```json
-{
-  "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-  "triage_level": "urgent",
-  "routing_summary": "Same-day in-person evaluation is appropriate. If symptoms worsen suddenly, seek emergency care.",
-  "disclaimers": [
-    "This is not a medical diagnosis. If you believe you are having an emergency, call 911 or go to the nearest emergency department."
-  ],
-  "provider_recommendations": {
-    "zip": "94107",
-    "specialties": [
-      {
-        "taxonomy_code": "207Q00000X",
-        "display_name": "Family Medicine",
-        "rationale": "Initial evaluation of abdominal pain and coordination of follow-up."
-      }
-    ]
-  },
-  "pre_visit_report": {
-    "patient_summary": "Adult reports localized RLQ abdominal pain for ~24h without fever reported so far.",
-    "reported_symptoms": ["lower right abdominal pain"],
-    "duration": "since last night",
-    "triage_level": "urgent",
-    "relevant_history": "",
-    "current_medications": [],
-    "questions_for_provider": ["Any guarding or rebound tenderness on exam?"]
-  },
-  "messages": [
-    {
-      "role": "user",
-      "content": "I’ve had sharp pain in my lower right abdomen since last night.",
-      "timestamp": "2026-04-18T12:00:00Z"
-    },
-    {
-      "role": "assistant",
-      "content": "Thank you for sharing that. Are you experiencing fever, nausea, or vomiting along with the pain?",
-      "timestamp": "2026-04-18T12:00:05Z"
-    }
-  ]
-}
-```
-
-| Field | Type | Notes |
-|-------|------|--------|
-| `triage_level` | string | One of `emergency` \| `urgent` \| `routine` |
-| `routing_summary` | string | Short, user-facing explanation of suggested care setting |
-| `disclaimers` | string[] | Non-empty in production UI when showing triage results |
-| `provider_recommendations` | object | Hints for `GET /providers/` (taxonomy + human labels) |
-| `provider_recommendations.specialties` | array | At least one entry when `triage_level` is `urgent` or `routine`; may be empty for `emergency` if UI routes to ER only |
-| `pre_visit_report` | object | Aligns with the structured summary in [sympton-to-care.md](./sympton-to-care.md) |
-| `messages` | array | Full transcript snapshot for audit/UI replay (optional for clients that only need summary) |
-
-**Implementation note:** The server MAY hydrate concrete provider rows by calling NPPES internally, but the **minimum** contract is `provider_recommendations.specialties` plus client-side or follow-up calls to `GET /providers/`.
+**Future:** A dedicated **`POST /symptom/triage/`** could aggregate session state and return a single structured body; until it exists, clients MUST NOT assume that endpoint is available.
 
 ---
 
@@ -446,3 +395,6 @@ All developers MUST review this contract before Feature 1 implementation. Record
 | 1.0.4 | 2026-04-19 | Documented `followup_questions_round_2`, response `session_id`, and `active_medications` on `condition_assessment` for pre-visit reports |
 | 1.0.5 | 2026-04-19 | Documented `post_visit_diagnosis` on session list/detail and **`PATCH /api/sessions/<uuid>/`** |
 | 1.0.6 | 2026-04-19 | Documented optional **`prior_official_diagnoses`** on **`followup_questions`** `user_payload` |
+| 1.0.7 | 2026-04-19 | Marked **`POST /symptom/chat/`** as internal/future (no current frontend consumer) |
+| 1.0.8 | 2026-04-19 | Removed draft **`POST /symptom/triage/`** contract; documented actual triage/routing/transcript behavior (no route in `urls.py`) |
+| 1.0.9 | 2026-04-19 | Survey LLM: server prompt option, payload caps, scoped throttle, refined **502**/**503**/**429** errors; documented **`price_estimate_context`** phase |

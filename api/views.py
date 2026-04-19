@@ -113,20 +113,22 @@ class ExampleItemViewSet(viewsets.ModelViewSet):
 
 class SymptomSessionViewSet(viewsets.ModelViewSet):
     """
-    ViewSet for managing symptom sessions.
-    Users can only access their own sessions.
+    ViewSet for managing symptom sessions (router: /api/symptom-sessions/).
+    Scoped to the authenticated user; list/retrieve/update/destroy/book use get_queryset().
     """
-    queryset = SymptomSession.objects.all()
+
+    permission_classes = [IsAuthenticated]
     serializer_class = SymptomSessionSerializer
-    # permission_classes = [IsAuthenticated]  # Temporarily disabled for testing
+    # Router introspection only; all requests use get_queryset() (user-scoped).
+    queryset = SymptomSession.objects.none()
 
     def get_queryset(self):
-        # return self.queryset.filter(user=self.request.user)
-        return self.queryset  # Temporarily allow all for testing
+        return SymptomSession.objects.filter(user=self.request.user).order_by(
+            "-created_at", "-pk"
+        )
 
     def perform_create(self, serializer):
-        # serializer.save(user=self.request.user)
-        serializer.save()  # Temporarily no user for testing
+        serializer.save(user=self.request.user)
 
     @action(detail=True, methods=['post'])
     def book(self, request, pk=None):

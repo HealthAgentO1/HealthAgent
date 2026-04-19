@@ -1,8 +1,8 @@
 # Symptom-to-Care Agent — Design Doc
 
 **Status:** Draft  
-**Author:** Carl Gombert
-**Last updated:** 2026-04-19 (survey LLM via Django `symptom/survey-llm/`; pre-visit report + `active_medications` from browser regimen)
+**Author(s):** Carl Gombert, Zander McGinley
+**Last updated:** 2026-04-19 (survey LLM: server prompt option, caps, throttling; pre-visit report shapes documented in § Pre-Visit Report Format)
 
 ---
 
@@ -55,7 +55,7 @@ The `/symptom-check` route implements the **survey flow** in the browser:
 
 **Client modules:** `frontend/src/symptomCheck/symptomLlmClient.ts` builds `{ phase, system_prompt, user_payload }` and `POST`s it to **`POST /api/symptom/survey-llm/`** via `apiClient` (requires JWT — users who are not signed in see an error). **Parsing** tolerates optional Markdown JSON fences; **validation** is in `validatePayloads.ts` so bad model output fails fast with a user-visible error. **`frontend/src/symptomCheck/nppesFacilitiesClient.ts`** `POST`s address + `taxonomy_codes` to **`POST /api/symptom/nearby-facilities/`** and validates the facility list JSON.
 
-**Backend:** `api/views_symptom.py` (`SymptomSurveyLlmView`) forwards to `complete_symptom_survey_turn` in `api/services/symptom_llm.py` (OpenAI-compatible or Anthropic per `LLM_PROVIDER`). The HTTP response is `{ "raw_text": "<model output>", "phase": "...", "session_id": "<uuid>" }`. On **`condition_assessment`**, after persisting the turn, Django runs **`build_pre_visit_report`** in **`api/services/report_service.py`** (transcript + formatted medication lines + LLM JSON for chief complaint, HPI, etc.) and saves **`pre_visit_report`** on the session. **`SymptomNearbyFacilitiesView`** calls `find_nearby_facilities` in **`api/services/nppes_nearby.py`** (NPPES + Census; no API key).
+**Backend:** `api/views_symptom.py` (`SymptomSurveyLlmView`) forwards to `complete_symptom_survey_turn` in `api/services/symptom_llm.py` (OpenAI-compatible or Anthropic per `LLM_PROVIDER`). The HTTP response is `{ "raw_text": "<model output>", "phase": "...", "session_id": "<uuid>" }`. In **production**, Django can **ignore** the client `system_prompt` and load instructions from **`api/prompts/survey/`** by phase (**`SYMPTOM_SURVEY_USE_SERVER_PROMPTS`** — see `backend/settings.py` and **`docs/architecture.md`**); prompt text should stay aligned with the SPA copies under `frontend/src/symptomCheck/prompts/`. Requests are **size-limited**, **rate-limited**, and errors are mapped to HTTP statuses without logging raw PHI in application logs. On **`condition_assessment`**, after persisting the turn, Django runs **`build_pre_visit_report`** in **`api/services/report_service.py`** (transcript + formatted medication lines + LLM JSON for chief complaint, HPI, etc.) and saves **`pre_visit_report`** on the session. **`SymptomNearbyFacilitiesView`** calls `find_nearby_facilities` in **`api/services/nppes_nearby.py`** (NPPES + Census; no API key).
 
 Per-insurer **cost** text on the results page is **generic illustrative copy** (not facility-specific) until benefit integration exists.
 
@@ -73,14 +73,14 @@ Per-insurer **cost** text on the results page is **generic illustrative copy** (
 
 ### Core AI Agent (LLM Provider)
 - Docs: OpenAI-compatible HTTP or Anthropic Messages API, configured in Django (`LLM_PROVIDER`, `OPENAI_API_KEY` / `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`, etc.).
-- **Survey:** Prompt bodies ship in the SPA from `frontend/src/symptomCheck/prompts/*.txt` and are posted to Django; **API keys never leave the server**.
-- **Chat transcript API** (`POST /api/symptom/chat/`): system instructions load from `api/prompts/symptom_chat_system.txt` (distinct from the survey prompts).
-- Used for: Survey — **dynamic** follow-up questions (JSON), then **differential-style conditions**, **severity** fields, and **care_taxonomy** for downstream routing. Chat — conversational JSON with `assistant_message` and `triage_level`.
+- **Survey:** The SPA bundles prompt text from `frontend/src/symptomCheck/prompts/*.txt`; production Django may instead load **`api/prompts/survey/`** by phase (**`SYMPTOM_SURVEY_USE_SERVER_PROMPTS`**). **API keys never leave the server.** Survey calls are capped, throttled, and error-mapped (see **`docs/architecture.md`**).
+- **Chat transcript API** (`POST /api/symptom/chat/`): **internal / future use** (not wired in the current frontend). System instructions load from `api/prompts/symptom_chat_system.txt` (distinct from the survey prompts).
+- Used for: Survey — **dynamic** follow-up questions (JSON), then **differential-style conditions**, **severity** fields, and **care_taxonomy** for downstream routing. If chat is enabled later — conversational JSON with `assistant_message` and `triage_level`.
 - Context limits: `LLM_MAX_INPUT_TOKENS` trims the single survey user message if needed; chat uses `trim_chat_messages` on the transcript.
 
 ### NPPES (NPI Registry)
 - Docs: https://npiregistry.cms.hhs.gov/api-page
-- Used for: organizational provider search by **taxonomy code**, **ZIP**, and **state** (see `api/services/nppes_nearby.py`).
+- Used for: organizational provider search by **taxonomy code**, **ZIP**, and **state** (see `api/services/nppes_nearby.py`). The Read API uses **`taxonomy_code`** for NUCC codes and **`taxonomy_description`** for human-readable specialty text; **`NPPESService.search_providers`** maps inputs accordingly (`api/services/nppes_service.py`).
 - Key endpoint: `GET https://npiregistry.cms.hhs.gov/api/?version=2.1&...` (parameters include `postal_code`, `taxonomy_code`, `enumeration_type=NPI-2`, `address_purpose=LOCATION`).
 - Auth: None (public API). Requests originate from the **Django** app, not the browser (avoids CORS and keeps query shaping centralized).
 
@@ -112,7 +112,7 @@ class SymptomSession(models.Model):
 
 The structured survey stores an LLM-shaped object on **`SymptomSession.pre_visit_report`**, including fields such as **`chief_complaint`**, **`hpi`**, **`patient_description`**, **`risk_factors`**, **`triage_level`**, and **`medications`** (array of strings). Medication strings are typically **one line per drug**, optionally including regimen details when **`active_medications`** was present on the final survey turn (e.g. `Name — dosage: 10 mg; frequency: daily; …`). The patient-facing **Reports** page maps this JSON via `frontend/src/utils/preVisitReportPatientView.ts`.
 
-A minimal **intermediate** shape may exist briefly before the full LLM merge (see `apply_condition_assessment_summary` in `api/services/survey_session_persist.py`). Chat-only sessions (`POST /api/symptom/chat/`) may still rely on the latest **`MedicationProfile`** names when building reports if no browser regimen was sent.
+A minimal **intermediate** shape may exist briefly before the full LLM merge (see `apply_condition_assessment_summary` in `api/services/survey_session_persist.py`). Sessions created only via the chat endpoint (if used) may still rely on the latest **`MedicationProfile`** names when building reports if no browser regimen was sent.
 
 ```json
 {
