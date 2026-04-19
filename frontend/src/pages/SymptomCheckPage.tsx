@@ -4,7 +4,8 @@
  * Step 3 loads nearby facilities from `POST /api/symptom/nearby-facilities/` (NPPES + Census geocoding via Django).
  *
  * Progress is mirrored to `localStorage` (see `symptomCheckSession.ts`) so users can resume
- * after refresh or navigation; in-flight LLM phases are re-requested on "Resume".
+ * after refresh or navigation; in-flight LLM phases are re-requested on "Resume". Step 1 can
+ * optionally attach past **`post_visit_diagnosis`** labels to the first LLM call (`prior_official_diagnoses`).
  * Optional account default address (`GET/PATCH /auth/me/` `default_address`) prefills step 1 when empty.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -17,7 +18,12 @@ import {
   updateUserProfile,
   userAddressToDefaultPayload,
 } from '../api/profile';
-import { fetchSymptomSessionResume } from '../api/queries';
+import {
+  fetchSymptomSessionResume,
+  useSymptomSessions,
+  type SymptomSessionListItem,
+} from '../api/queries';
+import { useAuth } from '../context/AuthContext';
 import { LinearLoadingBar, useSimulatedProgress } from '../components/LinearLoadingBar';
 import type {
   FollowUpAnswer,
@@ -38,6 +44,7 @@ import {
   buildGoogleMapsUrl,
   requestNearbyFacilities,
   type NearbyFacility,
+  type SymptomInsurerSlug,
 } from '../symptomCheck/nppesFacilitiesClient';
 import { priceEstimateCacheFingerprint } from '../symptomCheck/priceEstimateCache';
 import { PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS } from '../symptomCheck/priceEstimateStaticDisclaimer';
@@ -73,6 +80,14 @@ import {
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from '../symptomCheck/symptomCheckSession';
+import { uniquePriorOfficialDiagnoses } from '../symptomCheck/priorOfficialDiagnoses';
+import { PostVisitDiagnosisSection } from '../symptomCheck/PostVisitDiagnosisSection';
+import {
+  markPostVisitDiagnosisEligible,
+  isPostVisitDiagnosisEligible,
+} from '../symptomCheck/postVisitDiagnosisEligibility';
+import type { PostVisitDiagnosis } from '../symptomCheck/postVisitDiagnosisTypes';
+import { parsePostVisitDiagnosis } from '../symptomCheck/postVisitDiagnosisTypes';
 import { scrollAppToTop } from '../utils/scrollAppToTop';
 
 const INSURANCE_OPTIONS = [
@@ -262,6 +277,13 @@ function initialIntakeSubstepFromLocation(): IntakeSubstep {
 const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+  /** Past checks with `post_visit_diagnosis` — used for optional first-LLM context on step 1. */
+  const { data: symptomSessionsList } = useSymptomSessions({ enabled: isAuthenticated });
+  const priorOfficialDiagnosisLabels = useMemo(
+    () => uniquePriorOfficialDiagnoses(symptomSessionsList ?? []),
+    [symptomSessionsList],
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const [step, setStep] = useState<SymptomCheckFlowStep>('intake');
   const [intakeSubstep, setIntakeSubstep] = useState<IntakeSubstep>(
@@ -321,19 +343,26 @@ const SymptomCheckPage: React.FC = () => {
   const [surveyBackendSessionId, setSurveyBackendSessionId] = useState<string | null>(
     null,
   );
+  /** Official clinician diagnosis after a visit (`SymptomSession.post_visit_diagnosis` on the server). */
+  const [postVisitDiagnosis, setPostVisitDiagnosis] = useState<PostVisitDiagnosis | null>(null);
   const [urlSessionHydrating, setUrlSessionHydrating] = useState(false);
   const [resumeChatNotice, setResumeChatNotice] = useState(false);
+  /** When true, first survey LLM call receives `prior_official_diagnoses` from past post-visit records. */
+  const [includePriorDiagnosesInLlm, setIncludePriorDiagnosesInLlm] = useState(false);
+  const [priorDiagnosesInfoOpen, setPriorDiagnosesInfoOpen] = useState(false);
 
   const followUpMutation = useMutation({
     mutationFn: (vars: {
       symptoms: string;
       insuranceLabel: string;
       practiceLocation: PracticeLocationPayload | null;
+      priorOfficialDiagnoses?: string[];
     }): Promise<FollowUpQuestionsWithSession> =>
       requestFollowUpQuestions({
         symptoms: vars.symptoms,
         insuranceLabel: vars.insuranceLabel,
         practiceLocation: vars.practiceLocation,
+        priorOfficialDiagnoses: vars.priorOfficialDiagnoses,
       }),
   });
 
@@ -446,6 +475,7 @@ const SymptomCheckPage: React.FC = () => {
         if (cancelled) return;
 
         setSurveyBackendSessionId(sid);
+        setPostVisitDiagnosis(parsePostVisitDiagnosis(data.post_visit_diagnosis ?? null));
         setSymptoms(data.symptoms ?? '');
         const resumedSlug = insuranceIdFromLabel(data.insurance_label ?? '');
         setInsurance(resumedSlug);
@@ -593,6 +623,7 @@ const SymptomCheckPage: React.FC = () => {
   const runFollowUpRequest = async (input: {
     symptoms: string;
     insuranceLabel: string;
+    priorOfficialDiagnoses?: string[];
   }) => {
     setLlmError(null);
     setPendingRequest('followup');
@@ -601,6 +632,7 @@ const SymptomCheckPage: React.FC = () => {
         symptoms: input.symptoms,
         insuranceLabel: input.insuranceLabel,
         practiceLocation: practiceLocationPayloadFromUserAddress(userAddress),
+        priorOfficialDiagnoses: input.priorOfficialDiagnoses,
       });
       setSurveyBackendSessionId(data.session_id);
       setFollowUpQuestions(data.questions);
@@ -729,9 +761,14 @@ const SymptomCheckPage: React.FC = () => {
   /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
   const handleContinueToFollowUp = async () => {
     if (!intakeValid || pendingRequest) return;
+    const prior =
+      includePriorDiagnosesInLlm && priorOfficialDiagnosisLabels.length > 0
+        ? priorOfficialDiagnosisLabels
+        : undefined;
     await runFollowUpRequest({
       symptoms: symptoms.trim(),
       insuranceLabel: insurerLabel,
+      priorOfficialDiagnoses: prior,
     });
   };
 
@@ -782,6 +819,10 @@ const SymptomCheckPage: React.FC = () => {
       surveyBackendSessionId,
       priceEstimate,
       priceEstimateCacheFingerprint: priceEstimateCacheFingerprintState,
+      includePriorDiagnosesInLlm,
+      priorOfficialDiagnosesSnapshot: includePriorDiagnosesInLlm
+        ? priorOfficialDiagnosisLabels
+        : [],
     };
     writeSymptomCheckSession(snapshot);
   }, [
@@ -798,6 +839,8 @@ const SymptomCheckPage: React.FC = () => {
     pendingRequest,
     llmError,
     surveyBackendSessionId,
+    includePriorDiagnosesInLlm,
+    priorOfficialDiagnosisLabels,
     priceEstimate,
     priceEstimateCacheFingerprintState,
   ]);
@@ -974,6 +1017,7 @@ const SymptomCheckPage: React.FC = () => {
     );
     setLlmError(snap.llmError);
     setSurveyBackendSessionId(snap.surveyBackendSessionId);
+    setIncludePriorDiagnosesInLlm(snap.includePriorDiagnosesInLlm === true);
     setPriceEstimate(snap.priceEstimate ?? null);
     setPriceEstimateCacheFingerprintState(snap.priceEstimateCacheFingerprint ?? null);
     setPendingRequest(null);
@@ -1027,7 +1071,21 @@ const SymptomCheckPage: React.FC = () => {
 
     if (snap.pendingRequest === 'followup') {
       if (trimmed.length === 0 || !ins) return;
-      void runFollowUpRequest({ symptoms: trimmed, insuranceLabel: label });
+      const cached = queryClient.getQueryData<SymptomSessionListItem[]>(['symptom-sessions']);
+      const freshLabels = uniquePriorOfficialDiagnoses(cached ?? []);
+      const priorList =
+        snap.includePriorDiagnosesInLlm
+          ? snap.priorOfficialDiagnosesSnapshot.length > 0
+            ? snap.priorOfficialDiagnosesSnapshot
+            : freshLabels.length > 0
+              ? freshLabels
+              : undefined
+          : undefined;
+      void runFollowUpRequest({
+        symptoms: trimmed,
+        insuranceLabel: label,
+        priorOfficialDiagnoses: priorList,
+      });
     } else if (snap.pendingRequest === 'followup_round_2') {
       if (trimmed.length === 0 || !ins) return;
       if (snap.followUpQuestions.length === 0) return;
@@ -1067,6 +1125,8 @@ const SymptomCheckPage: React.FC = () => {
     setLlmError(null);
     setPendingRequest(null);
     setSurveyBackendSessionId(null);
+    setPostVisitDiagnosis(null);
+    setIncludePriorDiagnosesInLlm(false);
     setResumeChatNotice(false);
     setPriceEstimate(null);
     setPriceEstimateCacheFingerprintState(null);
@@ -1095,6 +1155,8 @@ const SymptomCheckPage: React.FC = () => {
     setLlmError(null);
     setPendingRequest(null);
     setSurveyBackendSessionId(null);
+    setPostVisitDiagnosis(null);
+    setIncludePriorDiagnosesInLlm(false);
     setResumeChatNotice(false);
     setResultsEntered(false);
     setPriceEstimate(null);
@@ -1112,6 +1174,36 @@ const SymptomCheckPage: React.FC = () => {
     const t = window.setTimeout(() => setResultsEntered(true), 40);
     return () => clearTimeout(t);
   }, [results]);
+
+  /** Refresh diagnosis from the API while on the results step (e.g. after local resume without `?session=`). */
+  useEffect(() => {
+    if (step !== "results" || !surveyBackendSessionId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const data = await fetchSymptomSessionResume(surveyBackendSessionId);
+        if (cancelled) return;
+        setPostVisitDiagnosis(parsePostVisitDiagnosis(data.post_visit_diagnosis ?? null));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, surveyBackendSessionId]);
+
+  /**
+   * After the user leaves this page from the results step once, allow recording an official
+   * post-visit diagnosis on the next visit (`postVisitDiagnosisEligibility` localStorage flag).
+   */
+  useEffect(() => {
+    return () => {
+      if (step === "results" && results !== null && surveyBackendSessionId) {
+        markPostVisitDiagnosisEligible(surveyBackendSessionId);
+      }
+    };
+  }, [step, results, surveyBackendSessionId]);
 
   const stepIndex =
     step === 'intake' ? 1 : step === 'followup' || step === 'followup_round_2' ? 2 : 3;
@@ -1583,6 +1675,52 @@ const SymptomCheckPage: React.FC = () => {
           </div>
         ) : null}
 
+        {priorDiagnosesInfoOpen ? (
+          <div
+            aria-labelledby="prior-dx-info-title"
+            aria-modal="true"
+            className="fixed inset-0 z-[55] flex items-center justify-center p-4 bg-black/50"
+            role="dialog"
+          >
+            <div className="bg-surface-container-lowest max-h-[min(90vh,520px)] w-full max-w-lg overflow-y-auto rounded-xl border border-outline-variant/20 p-6 shadow-xl md:p-8">
+              <h2
+                className="font-headline text-xl font-bold text-primary mb-3"
+                id="prior-dx-info-title"
+              >
+                Including past official diagnoses
+              </h2>
+              <div className="space-y-3 font-body text-sm leading-relaxed text-on-surface-variant">
+                <p>
+                  After you complete a symptom check and later record your clinician&apos;s official
+                  diagnosis (Post-visit Diagnosis), that label is stored on your account with that
+                  check—not the AI&apos;s illustrative list, but what you entered as the real
+                  diagnosis after a visit.
+                </p>
+                <p>
+                  If you turn this option on, those saved labels are sent to the{" "}
+                  <strong className="text-on-surface">first</strong> guided step (the follow-up
+                  questions) together with your <strong className="text-on-surface">current</strong>{" "}
+                  symptom description. The model can use them as medical background—for example to
+                  ask better clarifying questions if a condition might recur or interact with what
+                  you report now.
+                </p>
+                <p>
+                  This does not replace your medical record, and you can leave the box unchecked to
+                  run a check without sharing those past labels. You must be signed in and have at
+                  least one saved post-visit diagnosis for the option to be available.
+                </p>
+              </div>
+              <button
+                className="mt-6 cursor-pointer rounded-lg border border-outline-variant/40 px-6 py-2.5 font-headline text-sm font-semibold text-primary hover:bg-surface-container transition-colors"
+                type="button"
+                onClick={() => setPriorDiagnosesInfoOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <header className="mb-10 flex flex-col lg:flex-row lg:items-end justify-between gap-6">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed text-xs font-semibold uppercase tracking-wider mb-4 border border-secondary-fixed-dim/30">
@@ -1771,6 +1909,44 @@ const SymptomCheckPage: React.FC = () => {
                   Include timing, severity, anything that makes it better or worse, and
                   relevant history if you are comfortable sharing it.
                 </p>
+              </div>
+
+              <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low/50 px-4 py-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    id="include-prior-diagnoses-llm"
+                    type="checkbox"
+                    className="accent-primary mt-1 h-4 w-4 shrink-0 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                    checked={includePriorDiagnosesInLlm}
+                    disabled={!isAuthenticated || priorOfficialDiagnosisLabels.length === 0}
+                    onChange={(e) => setIncludePriorDiagnosesInLlm(e.target.checked)}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label
+                        htmlFor="include-prior-diagnoses-llm"
+                        className="cursor-pointer text-sm font-semibold text-on-surface"
+                      >
+                        Include my past official diagnoses in this check
+                      </label>
+                      <button
+                        type="button"
+                        className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full border border-outline-variant/40 text-primary hover:bg-surface-container-high/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                        aria-label="Learn how past diagnoses are used"
+                        onClick={() => setPriorDiagnosesInfoOpen(true)}
+                      >
+                        <span className="material-symbols-outlined text-lg">info</span>
+                      </button>
+                    </div>
+                    <p className="mt-1 text-xs leading-relaxed text-on-surface-variant font-body">
+                      {!isAuthenticated
+                        ? "Sign in to use diagnoses you have saved after past visits (Post-visit Diagnosis on completed checks)."
+                        : priorOfficialDiagnosisLabels.length === 0
+                          ? "When you record an official diagnosis after a visit on a past check, you can include those labels here."
+                          : "The first AI step will receive your current symptoms plus these recorded diagnoses as background context."}
+                    </p>
+                  </div>
+                </div>
               </div>
 
               <fieldset className="border-0 p-0 mx-0 mb-0">
@@ -2423,6 +2599,16 @@ const SymptomCheckPage: React.FC = () => {
                 </article>
               )}
             </section>
+
+            {surveyBackendSessionId ? (
+              <PostVisitDiagnosisSection
+                sessionId={surveyBackendSessionId}
+                conditionTitles={results.conditions.map((c) => c.title)}
+                saved={postVisitDiagnosis}
+                showEntryForm={isPostVisitDiagnosisEligible(surveyBackendSessionId)}
+                onSaved={(d) => setPostVisitDiagnosis(d)}
+              />
+            ) : null}
 
             <div className="flex flex-wrap gap-3 justify-center">
               {surveyBackendSessionId ? (

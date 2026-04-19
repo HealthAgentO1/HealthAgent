@@ -9,9 +9,11 @@ from .models import ExampleItem, SymptomSession
 from .serializers import (
     ExampleItemSerializer,
     SymptomSessionListSerializer,
+    SymptomSessionPostVisitDiagnosisSerializer,
     SymptomSessionResumeSerializer,
     SymptomSessionSerializer,
 )
+from .services.session_resume import build_session_resume_payload
 
 class UserSymptomSessionsListView(generics.ListAPIView):
     """
@@ -27,19 +29,32 @@ class UserSymptomSessionsListView(generics.ListAPIView):
         )
 
 
-class UserSymptomSessionRetrieveView(generics.RetrieveDestroyAPIView):
+class UserSymptomSessionRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     """
     GET /api/sessions/<uuid>/ — resume payload for Symptom Check deep links from the dashboard.
+    PATCH /api/sessions/<uuid>/ — set or clear `post_visit_diagnosis` (official diagnosis after a visit).
     DELETE /api/sessions/<uuid>/ — remove one saved session (same auth and ownership rules as GET).
     """
 
-    serializer_class = SymptomSessionResumeSerializer
     permission_classes = [IsAuthenticated]
     lookup_field = "public_id"
     lookup_url_kwarg = "session_public_id"
 
     def get_queryset(self):
         return SymptomSession.objects.filter(user=self.request.user)
+
+    def get_serializer_class(self):
+        if self.request.method == "PATCH":
+            return SymptomSessionPostVisitDiagnosisSerializer
+        return SymptomSessionResumeSerializer
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        instance.refresh_from_db()
+        return Response(build_session_resume_payload(instance))
 
 
 class ExampleItemViewSet(viewsets.ModelViewSet):

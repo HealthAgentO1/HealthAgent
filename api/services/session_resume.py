@@ -19,6 +19,8 @@ class SessionResumePayload(TypedDict, total=False):
     price_estimate_raw_text: str
     triage_level: str | None
     created_at: str
+    # Official diagnosis after an in-person visit (patient-entered); null if not recorded.
+    post_visit_diagnosis: dict[str, Any] | None
     practice_location: dict[str, str]
 
 
@@ -139,10 +141,16 @@ def build_session_resume_payload(session: SymptomSession) -> SessionResumePayloa
     created = session.created_at
     created_s = created.isoformat().replace("+00:00", "Z") if created else ""
 
+    pvd = session.post_visit_diagnosis
+    post_visit_diagnosis: dict[str, Any] | None = None
+    if isinstance(pvd, dict):
+        post_visit_diagnosis = pvd
+
     base: SessionResumePayload = {
         "session_id": str(session.public_id),
         "triage_level": session.triage_level,
         "created_at": created_s,
+        "post_visit_diagnosis": post_visit_diagnosis,
     }
 
     if turns:
