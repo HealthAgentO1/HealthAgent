@@ -35,11 +35,19 @@
   --color-on-tertiary-fixed: #002021;
   --color-on-tertiary-fixed-variant: #174e50;
 
-  /* ─ Colors: Error ─ */
+  /* ─ Colors: Error (severe / emergency triage) ─ */
   --color-error: #ba1a1a;
   --color-on-error: #ffffff;
   --color-error-container: #ffdad6;
   --color-on-error-container: #93000a;
+
+  /* ─ Triage: moderate (urgent) & mild (routine) — aligns with severity language ─ */
+  --color-moderate-surface: #fff3e0;
+  --color-on-moderate: #bf360c;
+  --color-moderate-outline: #ffcc80;
+  --color-mild-surface: #e8f5e9;
+  --color-on-mild: #1b5e20;
+  --color-mild-outline: #a5d6a7;
 
   /* ─ Colors: Surface System ─ */
   --color-surface: #f7f9fe;

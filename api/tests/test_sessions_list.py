@@ -50,6 +50,10 @@ class SymptomSessionsListApiTests(APITestCase):
         self.assertEqual(res.data[0]["session_id"], str(newer.public_id))
         self.assertEqual(res.data[0]["triage_level"], "urgent")
         self.assertEqual(res.data[0]["summary"], "Severe abdominal pain.")
+        self.assertEqual(
+            res.data[0]["pre_visit_report"],
+            {"patient_summary": "Severe abdominal pain."},
+        )
         self.assertEqual(res.data[1]["session_id"], str(older.public_id))
         self.assertEqual(res.data[1]["summary"], "Mild cough.")
 

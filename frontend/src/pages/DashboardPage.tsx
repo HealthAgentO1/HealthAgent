@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { useSymptomSessions } from "../api/queries";
+import { triageBadgeClasses } from "../utils/triageSeverityStyles";
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -12,19 +13,6 @@ function formatSessionTimestamp(iso: string): string {
   } catch {
     return iso;
   }
-}
-
-function triageBadgeClasses(level: string | null): string {
-  if (level === "emergency") {
-    return "bg-error-container/50 text-on-error-container border-error-container/40";
-  }
-  if (level === "urgent") {
-    return "bg-tertiary-container/50 text-on-tertiary-container border-tertiary-container/40";
-  }
-  if (level === "routine") {
-    return "bg-primary-fixed/15 text-primary border-primary-fixed-dim/40";
-  }
-  return "bg-surface-container-high text-on-surface-variant border-outline-variant/30";
 }
 
 function triageLabel(level: string | null): string {
