@@ -83,5 +83,5 @@ jobs:
             --region ${{ env.REGION }} \
             --set-env-vars DJANGO_DEBUG=False,POSTGRES_HOST=/cloudsql/${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
             --set-cloudsql-instances ${{ env.PROJECT_ID }}:${{ env.REGION }}:health-guardian-db \
-            --execute --wait
+            --execute-now --wait
           gcloud run jobs delete migrate-job-${{ github.sha }} --region ${{ env.REGION }} --quiet
