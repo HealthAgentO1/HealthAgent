@@ -49,17 +49,19 @@ const LoginPage = () => {
     <div className="min-h-screen flex items-center justify-center bg-surface px-4 py-12">
       <div className="w-full max-w-md rounded-2xl bg-surface-container-lowest shadow-[0_8px_32px_rgba(24,28,32,0.08)] border border-outline-variant/40 p-8">
         <div className="flex items-center gap-3 mb-8">
-          <div className="w-11 h-11 rounded-xl gradient-primary flex items-center justify-center shadow-[0_4px_12px_rgba(0,55,111,0.2)]">
-            <span className="material-symbols-outlined text-on-primary icon-fill text-2xl">
-              health_and_safety
-            </span>
-          </div>
+          <img
+            src="/icon.png"
+            alt=""
+            width={44}
+            height={44}
+            className="w-11 h-11 rounded-xl object-contain shadow-[0_4px_12px_rgba(24,28,32,0.12)] shrink-0"
+          />
           <div>
             <h1 className="text-xl font-extrabold text-primary font-headline">
               Sign in
             </h1>
             <p className="text-sm text-on-surface-variant font-medium">
-              Health Guardian
+              HealthOS
             </p>
           </div>
         </div>
