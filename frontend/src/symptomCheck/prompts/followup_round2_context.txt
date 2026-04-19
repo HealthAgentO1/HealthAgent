@@ -31,7 +31,7 @@ Field rules:
 - If you need more detail, include between 1 and 4 targeted questions only. Do not ask about topics already thoroughly covered.
 - "input_type" meanings:
   - single_choice: exactly one option must be selectable. Include at least two options.
-  - multi_choice: zero or more options may apply. Include at least two options.
+  - multi_choice: zero or more options may apply. Include at least two clinical/content options, and always add a final option with id "none_of_the_above" and label "None of the above" (the app enforces mutual exclusivity: choosing it clears other selections). List this option last.
   - text: free-text answer. Omit "options" or use an empty array.
   - scale_1_10: numeric severity or intensity scale from 1 to 10. Set scale_min to 1, scale_max to 10, and provide scale_min_label / scale_max_label.
 - Omit optional fields when not used (for example, omit options for text and scale questions).

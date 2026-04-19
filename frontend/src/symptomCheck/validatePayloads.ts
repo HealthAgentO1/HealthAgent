@@ -17,6 +17,48 @@ const INPUT_TYPES = new Set([
   "scale_1_10",
 ]);
 
+/** Canonical id for the exclusive “none of the above” option on multi-select questions (see prompts + `SymptomCheckPage`). */
+export const MULTI_CHOICE_NONE_OF_ABOVE_ID = "none_of_the_above";
+export const MULTI_CHOICE_NONE_OF_ABOVE_LABEL = "None of the above";
+
+function isNoneOfTheAboveOption(o: { id: string; label: string }): boolean {
+  if (o.id === MULTI_CHOICE_NONE_OF_ABOVE_ID || o.id === "none") return true;
+  return o.label.trim().toLowerCase() === MULTI_CHOICE_NONE_OF_ABOVE_LABEL.toLowerCase();
+}
+
+/**
+ * Ensures every multi-select question has exactly one “None of the above” choice as the last option.
+ * Collapses duplicate none-like options and normalizes id/label for UI mutual-exclusion logic.
+ */
+export function ensureMultiChoiceNoneOption(
+  options: { id: string; label: string }[],
+): { id: string; label: string }[] {
+  const norm = options.map((o) => ({ id: o.id, label: o.label }));
+  const noneIndices = norm.map((o, i) => (isNoneOfTheAboveOption(o) ? i : -1)).filter((i) => i >= 0);
+
+  if (noneIndices.length === 0) {
+    norm.push({ id: MULTI_CHOICE_NONE_OF_ABOVE_ID, label: MULTI_CHOICE_NONE_OF_ABOVE_LABEL });
+  } else {
+    const first = noneIndices[0]!;
+    norm[first] = { id: MULTI_CHOICE_NONE_OF_ABOVE_ID, label: MULTI_CHOICE_NONE_OF_ABOVE_LABEL };
+    const rest = noneIndices.slice(1).sort((a, b) => b - a);
+    for (const ri of rest) {
+      norm.splice(ri, 1);
+    }
+  }
+
+  const at = norm.findIndex((o) => o.id === MULTI_CHOICE_NONE_OF_ABOVE_ID);
+  if (at >= 0 && at !== norm.length - 1) {
+    const [row] = norm.splice(at, 1);
+    norm.push(row);
+  }
+
+  if (norm.length < 2) {
+    throw new Error("Invalid follow-up payload: multi_choice needs at least two options.");
+  }
+  return norm;
+}
+
 const SEVERITIES = new Set(["mild", "moderate", "severe"]);
 
 type Severity = "mild" | "moderate" | "severe";
@@ -101,7 +143,8 @@ export function validateFollowUpQuestionsPayload(
       if (options.length !== item.options.length) {
         throw new Error(`Invalid follow-up payload: question "${item.id}" has invalid options.`);
       }
-      base.options = options;
+      base.options =
+        inputType === "multi_choice" ? ensureMultiChoiceNoneOption(options) : options;
     }
 
     if (inputType === "scale_1_10") {

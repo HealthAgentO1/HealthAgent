@@ -28,6 +28,7 @@ import {
 } from "../symptomCheck/symptomLlmClient";
 import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
 import {
+  MULTI_CHOICE_NONE_OF_ABOVE_ID,
   validateFollowUpQuestionsPayload,
   validateSymptomResultsPayload,
 } from "../symptomCheck/validatePayloads";
@@ -111,6 +112,21 @@ function buildStructuredAnswers(
 }
 
 /** Default control values so required validation and sliders start in a defined state. */
+/** Maps legacy `none` ids from persisted sessions to the canonical multi-select exclusive id. */
+function migrateLegacyMultiChoiceAnswers(
+  answers: Record<string, FollowUpAnswer>,
+  questions: FollowUpQuestion[],
+): Record<string, FollowUpAnswer> {
+  const out = { ...answers };
+  for (const q of questions) {
+    if (q.input_type !== "multi_choice") continue;
+    const v = out[q.id];
+    if (!Array.isArray(v)) continue;
+    out[q.id] = v.map((id) => (id === "none" ? MULTI_CHOICE_NONE_OF_ABOVE_ID : id));
+  }
+  return out;
+}
+
 function buildInitialAnswers(questions: FollowUpQuestion[]): Record<string, FollowUpAnswer> {
   const out: Record<string, FollowUpAnswer> = {};
   for (const q of questions) {
@@ -624,9 +640,11 @@ const SymptomCheckPage: React.FC = () => {
     });
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions(snap.followUpQuestions);
-    setFollowUpAnswers(snap.followUpAnswers);
+    setFollowUpAnswers(migrateLegacyMultiChoiceAnswers(snap.followUpAnswers, snap.followUpQuestions));
     setSecondFollowUpQuestions(snap.secondFollowUpQuestions);
-    setSecondFollowUpAnswers(snap.secondFollowUpAnswers);
+    setSecondFollowUpAnswers(
+      migrateLegacyMultiChoiceAnswers(snap.secondFollowUpAnswers, snap.secondFollowUpQuestions),
+    );
     setResults(snap.results);
     setLlmError(snap.llmError);
     setSurveyBackendSessionId(snap.surveyBackendSessionId);
@@ -730,20 +748,20 @@ const SymptomCheckPage: React.FC = () => {
     setFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
   };
 
-  /**
-   * LLM may emit a `none` option id (see mock in `symptomLlmClient`); selecting it clears
-   * other chips so “none of the above” stays mutually exclusive with other symptoms.
-   */
+  /** “None of the above” uses id `none_of_the_above` (prompt + validation); legacy `none` is still accepted. */
+  const isExclusiveNoneOptionId = (id: string) =>
+    id === MULTI_CHOICE_NONE_OF_ABOVE_ID || id === "none";
+
   const toggleMultiChoice = (question: FollowUpQuestion, optionId: string) => {
     const current = followUpAnswers[question.id];
     const selected = Array.isArray(current) ? [...current] : [];
-    const isNone = optionId === "none";
+    const togglingNone = isExclusiveNoneOptionId(optionId);
 
     let next: string[];
-    if (isNone) {
-      next = selected.includes("none") ? [] : ["none"];
+    if (togglingNone) {
+      next = selected.includes(optionId) ? [] : [optionId];
     } else {
-      const withoutNone = selected.filter((id) => id !== "none");
+      const withoutNone = selected.filter((id) => !isExclusiveNoneOptionId(id));
       if (withoutNone.includes(optionId)) {
         next = withoutNone.filter((id) => id !== optionId);
       } else {
@@ -761,13 +779,13 @@ const SymptomCheckPage: React.FC = () => {
   const toggleSecondRoundMultiChoice = (question: FollowUpQuestion, optionId: string) => {
     const current = secondFollowUpAnswers[question.id];
     const selected = Array.isArray(current) ? [...current] : [];
-    const isNone = optionId === "none";
+    const togglingNone = isExclusiveNoneOptionId(optionId);
 
     let next: string[];
-    if (isNone) {
-      next = selected.includes("none") ? [] : ["none"];
+    if (togglingNone) {
+      next = selected.includes(optionId) ? [] : [optionId];
     } else {
-      const withoutNone = selected.filter((id) => id !== "none");
+      const withoutNone = selected.filter((id) => !isExclusiveNoneOptionId(id));
       if (withoutNone.includes(optionId)) {
         next = withoutNone.filter((id) => id !== optionId);
       } else {
