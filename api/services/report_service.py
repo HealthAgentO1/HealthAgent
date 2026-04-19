@@ -148,6 +148,26 @@ def _known_medications(session: SymptomSession) -> list[str]:
     return lines[:20]
 
 
+def merge_profile_and_llm_medications(
+    profile_meds: list[str],
+    llm_meds: list[str],
+) -> list[str]:
+    """Profile list first (saved regimen), then LLM-only additions; case-insensitive dedupe."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for source in (profile_meds, llm_meds):
+        for raw in source:
+            name = str(raw).strip()
+            if not name:
+                continue
+            key = name.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(name)
+    return out
+
+
 def build_pre_visit_report_prompt(session: SymptomSession) -> str:
     transcript = _serialize_conversation(session)
     medications = _known_medications(session)
@@ -192,8 +212,10 @@ def build_pre_visit_report(session: SymptomSession) -> dict[str, Any]:
     raw = complete_llm_chat(system_prompt, trimmed)
     report = parse_pre_visit_report_response(raw)
 
-    if not report.get("medications"):
-        report["medications"] = _known_medications(session)
+    profile_meds = _known_medications(session)
+    llm_meds = report.get("medications")
+    llm_list = llm_meds if isinstance(llm_meds, list) else []
+    report["medications"] = merge_profile_and_llm_medications(profile_meds, llm_list)
 
     report["triage_level"] = session.triage_level or report["triage_level"]
     return report
