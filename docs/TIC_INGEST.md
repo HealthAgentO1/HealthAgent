@@ -8,10 +8,10 @@ This is **not** member-specific eligibility. Posted payer files are plan- and pr
 
 ## Manifest and optional mapping
 
-- [`api/data/tic_us_manifest.json`](../api/data/tic_us_manifest.json): per-slug `table_of_contents_urls` (TOC JSON) plus optional `direct_in_network_file_urls` (direct MRF JSON links).
+- [`api/data/tic_us_manifest.json`](../api/data/tic_us_manifest.json): per-slug `table_of_contents_urls` (TOC JSON) plus optional `direct_in_network_file_urls` (direct MRF JSON links). **Order matters for `direct_in_network_file_urls`:** ingest walks that array in order, and `--max-files-per-insurer N` takes the first `N` URLs after TOC expansion—so put the states you care about first (Centene Ambetter is ordered large-state–first). TOC-derived URLs are still sorted so in-network JSON is preferred over allowed-amounts when names tie.
 - [`api/data/tic_reporting_entity_rules.json`](../api/data/tic_reporting_entity_rules.json): placeholder for future rules when one TOC must be split across multiple slugs.
 
-**Centene** uses a real public index URL in the manifest (Ambetter index JSON on `centene.com`; dates in the path change when Centene republishes—copy the current links from [Centene price transparency](https://www.centene.com/price-transparency-files.html) if ingest starts 404ing).
+**Centene** uses direct Ambetter per-state in-network JSON URLs on `centene.com` (see manifest). Dates in the path change when Centene republishes—copy current links from [Centene price transparency](https://www.centene.com/price-transparency-files.html) if ingest starts 404ing.
 
 **United**, **Elevance/Anthem**, and **Aetna** often publish TOCs behind SPA pages, CloudFront bot rules, or signed blob URLs. If `ingest_tic_network` finds no JSON files for those slugs, add working `direct_in_network_file_urls` from each payer’s compliance page or run ingest on a machine/browser session that can resolve their current index.
 
@@ -40,6 +40,18 @@ Downloads are cached under `data/tic_raw/` (gitignored). Content-addressed files
 Environment:
 
 - `SOURCE_GIT_COMMIT` or `GITHUB_SHA` — recorded on `NetworkDatasetVersion` for provenance.
+
+## Background daemon (periodic re-ingest)
+
+[`scripts/tic_ingest_daemon.sh`](../scripts/tic_ingest_daemon.sh) runs `ingest_tic_network` on a loop, appends each run to a log (default `data/tic_raw/ingest_daemon.log`), and prints the same lines to stdout. Already-processed URL+SHA pairs are skipped until Centene (or others) publish new files.
+
+From repo root with Compose already up:
+
+```bash
+nohup env USE_DOCKER=1 ./scripts/tic_ingest_daemon.sh >>data/tic_raw/daemon.nohup.out 2>&1 &
+```
+
+Useful env vars: `TIC_DAEMON_INTERVAL_SECONDS` (default `86400`), `TIC_DAEMON_LOG`, `TIC_DAEMON_INSURER` (single slug per cycle), `TIC_DAEMON_FORCE_REPARSE=1`, `TIC_DAEMON_MANIFEST`, `TIC_DAEMON_RESET_LOG=1` (truncate log once on startup so `tail -f` is not confused by old errors). One-shot: `./scripts/tic_ingest_daemon.sh --once`.
 
 ## Postgres dump and restore
 

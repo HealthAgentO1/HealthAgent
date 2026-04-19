@@ -88,8 +88,14 @@ def parse_medication_llm_json(raw: str) -> list[dict[str, Any]]:
     return out
 
 
-def _complete_openai_compatible(system_prompt: str, user_text: str) -> str:
-    """Call configured OpenAI-compatible API (DeepSeek when using default env)."""
+def complete_openai_compatible_json(system_prompt: str, user_text: str) -> str:
+    """
+    Call configured OpenAI-compatible API (DeepSeek when using default env).
+
+    Requests JSON-object mode when the provider supports it; callers parse the
+    returned string as JSON. Shared by medication extraction and other batched
+    JSON tasks (e.g. regimen interaction excerpt formatting).
+    """
     from openai import OpenAI
 
     if not settings.OPENAI_API_KEY:
@@ -137,7 +143,7 @@ def extract_medication_names_via_llm(free_text: str) -> list[dict[str, Any]]:
 
     system_prompt = get_medication_extract_system_prompt()
     try:
-        llm_raw = _complete_openai_compatible(system_prompt, raw)
+        llm_raw = complete_openai_compatible_json(system_prompt, raw)
         return parse_medication_llm_json(llm_raw)
     except json.JSONDecodeError as exc:
         raise MedicationLlmError(f"LLM returned invalid JSON: {exc}") from exc

@@ -13,9 +13,14 @@ export function truncateAtWord(text: string, maxChars: number): string {
 }
 
 /**
- * One or two sentences for the conflicts panel: direction line plus trimmed label excerpt.
+ * Conflicts list preview: prefer server `description_plain` (batched LLM), else
+ * direction line plus trimmed raw label excerpt.
  */
 export function concisePairwiseExplanation(row: PairwiseInteractionRow): string {
+  const plain = (row.description_plain || "").replace(/\s+/g, " ").trim();
+  if (plain) {
+    return truncateAtWord(plain, 320);
+  }
   const dir = (row.direction || "").replace(/\s+/g, " ").trim();
   const body = (row.description || "").replace(/\s+/g, " ").trim();
   const excerpt = truncateAtWord(body, 220);

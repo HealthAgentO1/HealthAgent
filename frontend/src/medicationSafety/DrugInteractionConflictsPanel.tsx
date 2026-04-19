@@ -47,13 +47,41 @@ function ConflictDetailModal({
               <p className="leading-relaxed whitespace-pre-wrap">{row.direction}</p>
             </div>
           ) : null}
+          {row.description_plain?.trim() ? (
+            <div>
+              <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">
+                Plain-language summary
+              </p>
+              <p className="leading-relaxed whitespace-pre-wrap break-words">{row.description_plain.trim()}</p>
+            </div>
+          ) : null}
           <div>
-            <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">
-              Full label excerpt
-            </p>
-            <p className="leading-relaxed whitespace-pre-wrap break-words">
-              {row.description?.trim() || "No excerpt stored for this pair."}
-            </p>
+            {row.description_plain?.trim() ? (
+              <details className="group">
+                <summary className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1 cursor-pointer list-none flex items-center gap-1 [&::-webkit-details-marker]:hidden">
+                  <span
+                    aria-hidden
+                    className="material-symbols-outlined text-base text-on-surface-variant group-open:rotate-90 transition-transform"
+                    style={{ fontVariationSettings: "'FILL' 0" }}
+                  >
+                    chevron_right
+                  </span>
+                  Original FDA label wording
+                </summary>
+                <p className="leading-relaxed whitespace-pre-wrap break-words mt-2 pl-6 text-on-surface-variant/95">
+                  {row.description?.trim() || "No excerpt stored for this pair."}
+                </p>
+              </details>
+            ) : (
+              <>
+                <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wide mb-1">
+                  Full label excerpt
+                </p>
+                <p className="leading-relaxed whitespace-pre-wrap break-words">
+                  {row.description?.trim() || "No excerpt stored for this pair."}
+                </p>
+              </>
+            )}
           </div>
         </div>
         <div className="px-5 py-3 border-t border-outline-variant/15 shrink-0">
@@ -72,7 +100,7 @@ function ConflictDetailModal({
 
 /**
  * Right column: only **pairwise drug–drug** conflicts from FDA label text (concise copy + severity).
- * Tap a row for the full untrimmed excerpt in a modal.
+ * Tap a row for plain-language summary (when the server provides it) and original label text.
  */
 export function DrugInteractionConflictsPanel({ loading, error, data }: Props) {
   const [detailRow, setDetailRow] = useState<PairwiseInteractionRow | null>(null);
@@ -147,7 +175,8 @@ export function DrugInteractionConflictsPanel({ loading, error, data }: Props) {
 
         <p className="text-xs text-on-surface-variant font-body mb-4 relative z-10 border-l-2 border-primary/25 pl-3 leading-snug">
           FDA label wording flags these pairs for extra review — not a full interaction database. Tap a
-          row for the full label excerpt. Ask your clinician or pharmacist about your doses and conditions.
+          row for a readable summary when available and the original label wording. Ask your clinician or
+          pharmacist about your doses and conditions.
         </p>
 
         <ul className="space-y-3 relative z-10">
@@ -171,7 +200,7 @@ export function DrugInteractionConflictsPanel({ loading, error, data }: Props) {
                   ) : null}
                 </div>
                 <p className="text-sm text-on-surface font-body leading-relaxed">{concisePairwiseExplanation(row)}</p>
-                <p className="text-xs text-primary font-medium mt-2">Tap for full text</p>
+                <p className="text-xs text-primary font-medium mt-2">Tap for details</p>
               </button>
             </li>
           ))}

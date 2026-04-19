@@ -134,26 +134,28 @@ def _gather_mrf_urls_for_insurer(entry: dict[str, Any], cache_dir: Path, dry_run
     slug = entry.get("slug")
     if not isinstance(slug, str) or not slug.strip():
         raise ValueError("Each manifest insurer needs a string 'slug'.")
-    discovered: list[str] = []
 
+    direct_urls: list[str] = []
+    seen: set[str] = set()
     direct = entry.get("direct_in_network_file_urls") or []
     if isinstance(direct, list):
         for u in direct:
-            if isinstance(u, str) and u.strip().startswith("http"):
-                discovered.append(u.strip())
+            if not isinstance(u, str) or not u.strip().startswith("http"):
+                continue
+            u = u.strip()
+            if u not in seen:
+                seen.add(u)
+                direct_urls.append(u)
 
+    toc_discovered: list[str] = []
     toc_list = entry.get("table_of_contents_urls") or []
     if isinstance(toc_list, list):
         seeds = [u.strip() for u in toc_list if isinstance(u, str) and u.strip().startswith("http")]
-        discovered.extend(_expand_toc_seeds_to_leaf_mrf_urls(seeds, cache_dir, dry_run))
+        toc_discovered = _expand_toc_seeds_to_leaf_mrf_urls(seeds, cache_dir, dry_run)
 
-    seen: set[str] = set()
-    out: list[str] = []
-    for u in discovered:
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
-    # Prefer negotiated in-network MRFs (path naming varies by payer).
+    # Prefer negotiated in-network MRFs for *TOC-derived* links only. Direct manifest URLs keep
+    # their declared order so `--max-files-per-insurer N` follows publisher intent (sorting the
+    # combined list alphabetically made `ambetter-al_*` always first).
     def _in_network_score(url: str) -> int:
         t = url.lower()
         s = 0
@@ -167,7 +169,15 @@ def _gather_mrf_urls_for_insurer(entry: dict[str, Any], cache_dir: Path, dry_run
             s -= 2
         return s
 
-    return sorted(out, key=lambda u: (-_in_network_score(u), u))
+    toc_candidates = [u for u in toc_discovered if u not in seen]
+    toc_sorted = sorted(toc_candidates, key=lambda u: (-_in_network_score(u), u))
+    toc_out: list[str] = []
+    for u in toc_sorted:
+        if u not in seen:
+            seen.add(u)
+            toc_out.append(u)
+
+    return direct_urls + toc_out
 
 
 def _ingest_npis_for_file(

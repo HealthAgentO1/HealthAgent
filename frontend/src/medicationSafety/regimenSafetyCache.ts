@@ -8,7 +8,10 @@ import { getStoredEmail } from "../api/authStorage";
 import type { ActiveMedication } from "./types";
 import { fetchRegimenSafety, type RegimenSafetyResponse } from "./regimenSafetyClient";
 
-const STORAGE_KEY = "healthagent_regimen_safety_cache_v1";
+const STORAGE_KEY = "healthagent_regimen_safety_cache_v2";
+
+/** In-flight regimen-safety fetches keyed by fingerprint (dedupes list + detail mounting together). */
+const pendingByFingerprint = new Map<string, Promise<RegimenSafetyResponse>>();
 
 type CacheEnvelope = {
   /** Lowercased email; must match current session for a hit. */
@@ -77,7 +80,18 @@ export async function loadRegimenSafetyCached(regimen: ActiveMedication[]): Prom
   if (hit) {
     return hit;
   }
-  const data = await fetchRegimenSafety(regimen);
-  writeCachedRegimenSafety(fp, data);
-  return data;
+  const existing = pendingByFingerprint.get(fp);
+  if (existing) {
+    return existing;
+  }
+  const pending = fetchRegimenSafety(regimen)
+    .then((data) => {
+      writeCachedRegimenSafety(fp, data);
+      return data;
+    })
+    .finally(() => {
+      pendingByFingerprint.delete(fp);
+    });
+  pendingByFingerprint.set(fp, pending);
+  return pending;
 }
