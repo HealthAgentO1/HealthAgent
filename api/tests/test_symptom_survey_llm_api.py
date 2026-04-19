@@ -83,3 +83,49 @@ class SymptomSurveyLlmApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    @patch("api.views_symptom.build_pre_visit_report")
+    @patch("api.views_symptom.complete_symptom_survey_turn")
+    def test_condition_assessment_uses_pre_visit_report_service(
+        self, mock_complete, mock_report
+    ):
+        mock_complete.side_effect = [
+            '{"questions": []}',
+            '{"overall_patient_severity":"mild","conditions":[{"title":"Tension headache","explanation":"x","why_possible":"y","condition_severity":"mild"}],"care_taxonomy":{"suggested_care_setting":"PCP","taxonomy_codes":[],"rationale_for_routing":"z"}}',
+        ]
+        mock_report.return_value = {
+            "chief_complaint": "Headache for two days.",
+            "hpi": "The patient reports a two-day headache with associated tension.",
+            "triage_level": "routine",
+            "patient_description": "Adult patient presenting with headache symptoms.",
+            "risk_factors": ["tension headache"],
+            "medications": [],
+        }
+
+        r1 = self.client.post(
+            self.url,
+            {
+                "phase": "followup_questions",
+                "system_prompt": "sys",
+                "user_payload": {"symptoms": "headache", "insurance_label": "Test"},
+            },
+            format="json",
+        )
+        self.assertEqual(r1.status_code, status.HTTP_200_OK)
+        sid = r1.data["session_id"]
+
+        r2 = self.client.post(
+            self.url,
+            {
+                "phase": "condition_assessment",
+                "system_prompt": "sys",
+                "user_payload": {"symptoms": "headache", "insurance_label": "Test"},
+                "session_id": sid,
+            },
+            format="json",
+        )
+        self.assertEqual(r2.status_code, status.HTTP_200_OK)
+
+        session = SymptomSession.objects.get(public_id=sid)
+        self.assertEqual(session.pre_visit_report["chief_complaint"], "Headache for two days.")
+        mock_report.assert_called_once_with(session)

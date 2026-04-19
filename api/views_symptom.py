@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import SymptomSession
+from .services.report_service import build_pre_visit_report
 from .services.survey_session_persist import (
     append_survey_turn,
     apply_condition_assessment_summary,
@@ -113,13 +114,22 @@ class SymptomChatView(APIView):
         }
         session.ai_conversation_log = log + [assistant_entry]
         session.triage_level = parsed["triage_level"]
-        session.save(
-            update_fields=[
-                "ai_conversation_log",
-                "triage_level",
-                "updated_at",
-            ]
-        )
+
+        update_fields = [
+            "ai_conversation_log",
+            "triage_level",
+            "updated_at",
+        ]
+        if parsed["interview_complete"]:
+            try:
+                report = build_pre_visit_report(session)
+                if report:
+                    session.pre_visit_report = report
+                    update_fields.insert(2, "pre_visit_report")
+            except Exception as e:
+                logger.exception("Failed to generate pre-visit report for session %s: %s", session.pk, e)
+
+        session.save(update_fields=update_fields)
 
         turn_index = sum(
             1 for e in session.ai_conversation_log if e.get("role") == "assistant"
@@ -189,6 +199,16 @@ class SymptomSurveyLlmView(APIView):
             apply_condition_assessment_summary(
                 session, raw_text=raw_text, user_payload=user_payload
             )
+            try:
+                report = build_pre_visit_report(session)
+                if report:
+                    session.pre_visit_report = report
+            except Exception as e:
+                logger.exception(
+                    "Failed to generate pre-visit report for session %s: %s",
+                    session.pk,
+                    e,
+                )
         session.save()
 
         return Response(
