@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./client";
+import type { PostVisitDiagnosis } from "../symptomCheck/postVisitDiagnosisTypes";
 
 // Define the shape of our provider data
 export interface Provider {
@@ -41,6 +42,8 @@ export interface SymptomSessionListItem {
   summary: string;
   /** Present when the symptom interview produced a structured handoff (survey or chat). */
   pre_visit_report: Record<string, unknown> | null;
+  /** Clinician diagnosis recorded after a visit; marks the check complete for reporting. */
+  post_visit_diagnosis?: PostVisitDiagnosis | null;
 }
 
 /** `GET /sessions/<uuid>/` — hydrate Symptom Check from a saved server session */
@@ -55,6 +58,18 @@ export interface SymptomSessionResume {
   price_estimate_raw_text?: string;
   triage_level: string | null;
   created_at: string;
+  post_visit_diagnosis?: PostVisitDiagnosis | null;
+}
+
+/** `PATCH /sessions/<uuid>/` — save official post-visit diagnosis (response body matches resume GET). */
+export async function patchSymptomSessionPostVisitDiagnosis(
+  sessionId: string,
+  diagnosis: PostVisitDiagnosis,
+): Promise<SymptomSessionResume> {
+  const { data } = await apiClient.patch<SymptomSessionResume>(`/sessions/${sessionId}/`, {
+    post_visit_diagnosis: diagnosis,
+  });
+  return data;
 }
 
 export async function fetchSymptomSessionResume(sessionId: string): Promise<SymptomSessionResume> {
@@ -67,10 +82,11 @@ const fetchSymptomSessions = async (): Promise<SymptomSessionListItem[]> => {
   return data;
 };
 
-export const useSymptomSessions = () => {
+export const useSymptomSessions = (options?: { enabled?: boolean }) => {
   return useQuery({
     queryKey: ["symptom-sessions"],
     queryFn: fetchSymptomSessions,
+    enabled: options?.enabled ?? true,
   });
 };
 

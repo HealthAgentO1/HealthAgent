@@ -9,7 +9,7 @@ from .views import (
     MedicationRecallsView,
     ProvidersView,
     SymptomSessionViewSet,
-    UserSymptomSessionRetrieveView,
+    UserSymptomSessionRetrieveUpdateDestroyView,
     UserSymptomSessionsListView,
 )
 from .views_medication import (
@@ -46,7 +46,7 @@ urlpatterns = [
     ),
     path(
         "sessions/<uuid:session_public_id>/",
-        UserSymptomSessionRetrieveView.as_view(),
+        UserSymptomSessionRetrieveUpdateDestroyView.as_view(),
         name="symptom-session-detail",
     ),
     path("sessions/", UserSymptomSessionsListView.as_view(), name="symptom-sessions-list"),

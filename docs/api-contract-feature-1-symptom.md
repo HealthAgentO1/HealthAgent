@@ -1,13 +1,15 @@
 # API contract — Feature 1 (Symptom-to-Care)
 
 **Status:** Draft (pre-implementation)  
-**Version:** 1.0.4  
+**Version:** 1.0.6  
 **Base URL (dev):** `http://127.0.0.1:8000/api`  
 **Primary consumer:** React frontend (`VITE_API_URL` + Axios)
 
 This document defines the HTTP contract for the symptom interview, triage submission, and NPPES-backed provider search. Backend implementations MUST preserve these paths, HTTP methods, and JSON field names unless the team agrees on a versioned revision.
 
 **Related:** Domain behavior and data model context live in [sympton-to-care.md](./sympton-to-care.md).
+
+**Session history & post-visit diagnosis:** Authenticated **`GET /api/sessions/`** returns each row’s **`post_visit_diagnosis`** (nullable JSON). **`GET /api/sessions/<uuid>/`** returns the resume payload including **`post_visit_diagnosis`**. **`PATCH /api/sessions/<uuid>/`** accepts **`{ "post_visit_diagnosis": { ... } }`** or **`null`** to clear; the response body matches **`GET`** (full resume payload). See section 6.
 
 **Symptom Check survey LLM:** The `/symptom-check` UI issues one or more `POST /api/symptom/survey-llm/` calls (authenticated): follow-up question generation (one or two rounds), then condition assessment. The SPA sends `system_prompt` text from `frontend/src/symptomCheck/prompts/*.txt` plus `user_payload`; on **`condition_assessment`** it also sends **`active_medications`** (the browser active regimen: names plus optional dosage, frequency, time, refill) for pre-visit reporting. Django calls the upstream LLM and returns `raw_text` for client-side JSON validation. This is **separate** from `POST /symptom/chat/` (conversational JSON contract below).
 
@@ -80,7 +82,7 @@ Runs one **stateless** survey turn for the React Symptom Check flow: either gene
 |-------|------|----------|--------|
 | `phase` | string | yes | `followup_questions` \| `followup_questions_round_2` \| `condition_assessment` (echoed in response for debugging) |
 | `system_prompt` | string | yes | Non-empty; in production the SPA bundles known-good templates |
-| `user_payload` | object | yes | JSON object. **`condition_assessment`** payloads include `symptoms`, `insurance_label`, `follow_up_answers`, and **`active_medications`** (array of objects: at minimum `name`; optional `dosage_mg`, `frequency`, `time_to_take`, `refill_before`, `common_name`, `scientific_name`) so the backend can attach the same regimen to the pre-visit report. |
+| `user_payload` | object | yes | JSON object. **`followup_questions`** may include **`prior_official_diagnoses`**: a string array of patient-recorded official diagnoses from past sessions (`SymptomSession.post_visit_diagnosis`), when the SPA opt-in is enabled. **`condition_assessment`** payloads include `symptoms`, `insurance_label`, `follow_up_answers`, and **`active_medications`** (array of objects: at minimum `name`; optional `dosage_mg`, `frequency`, `time_to_take`, `refill_before`, `common_name`, `scientific_name`) so the backend can attach the same regimen to the pre-visit report. |
 | `session_id` | string (UUID) \| null | no | Omit or null on the first survey turn; set to the previously returned `session_id` on later turns so all survey steps share one `SymptomSession`. |
 
 ### Response **200 OK**
@@ -369,6 +371,59 @@ Array of provider objects. Field set is a **stable v1 contract**; extra NPPES fi
 
 ---
 
+## 6. Symptom session detail — resume, post-visit diagnosis (implemented)
+
+**`GET /api/sessions/<uuid>/`**
+
+Returns the same JSON shape as today for resuming Symptom Check (`resume_step`, `symptoms`, `results_raw_text`, …) plus **`post_visit_diagnosis`** when present:
+
+```json
+{
+  "session_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "resume_step": "results",
+  "post_visit_diagnosis": {
+    "text": "Acute viral upper respiratory infection",
+    "source": "llm_condition",
+    "matched_condition_title": "Common cold"
+  }
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `post_visit_diagnosis` | object \| null | Absent or `null` until the patient saves an official diagnosis after a visit |
+
+**`PATCH /api/sessions/<uuid>/`**
+
+Authenticated partial update. Body:
+
+```json
+{
+  "post_visit_diagnosis": {
+    "text": "Acute viral upper respiratory infection",
+    "source": "llm_condition",
+    "matched_condition_title": "Common cold"
+  }
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `post_visit_diagnosis` | object \| null | yes | `null` clears the stored diagnosis |
+| `post_visit_diagnosis.text` | string | when object | Non-empty trimmed text shown to the user |
+| `post_visit_diagnosis.source` | string | when object | `llm_condition` \| `custom` |
+| `post_visit_diagnosis.matched_condition_title` | string \| null | when object | Required when `source` is `llm_condition` (must match one of the illustrative condition titles); omit or `null` for `custom` |
+
+**Response `200 OK`:** Full resume payload (same as **`GET`**), including updated `post_visit_diagnosis`.
+
+| HTTP | When |
+|------|------|
+| **400** | Validation (e.g. invalid `source`, missing `matched_condition_title` for `llm_condition`) |
+| **401** | Missing or invalid JWT |
+| **404** | Session not found or not owned by the user |
+
+---
+
 ## Review & sign-off
 
 All developers MUST review this contract before Feature 1 implementation. Record approval by adding name and date; change the document **Version** and add a changelog row when the contract changes.
@@ -389,3 +444,5 @@ All developers MUST review this contract before Feature 1 implementation. Record
 | 1.0.2 | 2026-04-18 | Added implemented `POST /symptom/survey-llm/`; SPA uses Django + JWT (removed browser-only mock path) |
 | 1.0.3 | 2026-04-18 | Documented implemented `POST /symptom/nearby-facilities/` (NPPES + Census via Django) for Symptom Check results |
 | 1.0.4 | 2026-04-19 | Documented `followup_questions_round_2`, response `session_id`, and `active_medications` on `condition_assessment` for pre-visit reports |
+| 1.0.5 | 2026-04-19 | Documented `post_visit_diagnosis` on session list/detail and **`PATCH /api/sessions/<uuid>/`** |
+| 1.0.6 | 2026-04-19 | Documented optional **`prior_official_diagnoses`** on **`followup_questions`** `user_payload` |

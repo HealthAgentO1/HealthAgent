@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { triageBadgeClasses } from "../utils/triageSeverityStyles";
+import { fetchUserProfile } from "../api/profile";
 import {
   useDeleteSymptomSession,
   useSymptomSessions,
@@ -8,7 +9,9 @@ import {
 } from "../api/queries";
 import { useAuth } from "../context/AuthContext";
 import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
+import { triageBadgeClasses } from "../utils/triageSeverityStyles";
 import { MedicationNameHeading } from "../medicationSafety/MedicationNameHeading";
+import { parsePostVisitDiagnosis } from "../symptomCheck/postVisitDiagnosisTypes";
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -34,8 +37,31 @@ function pickLatestSession(list: SymptomSessionListItem[]): SymptomSessionListIt
   )[0];
 }
 
+/**
+ * Greeting name: Settings profile `first_name` when set; otherwise the first segment of the
+ * email local-part before `.` / `_` / `-`, lowercased (not title-cased).
+ */
+function greetingDisplayName(
+  profile: { first_name?: string } | null | undefined,
+  email: string | null,
+): string {
+  const fromProfile = profile?.first_name?.trim();
+  if (fromProfile) return fromProfile;
+  if (!email) return "there";
+  const local = email.split("@")[0]?.trim() ?? "";
+  if (!local) return "there";
+  const first = local.split(/[._-]/)[0] ?? local;
+  if (!first) return "there";
+  return first.toLowerCase();
+}
+
 const DashboardPage: React.FC = () => {
-  const { email } = useAuth();
+  const { email, isAuthenticated } = useAuth();
+  const { data: userProfile } = useQuery({
+    queryKey: ["user-profile"],
+    queryFn: fetchUserProfile,
+    enabled: isAuthenticated,
+  });
   const { data: sessions, isLoading, isError, error } = useSymptomSessions();
   const deleteSession = useDeleteSymptomSession();
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
@@ -55,6 +81,12 @@ const DashboardPage: React.FC = () => {
     () => (!sessions?.length ? null : pickLatestSession(sessions)),
     [sessions],
   );
+
+  /** Used to tailor the care-pathway hero: encourage Post-visit Diagnosis when not yet saved. */
+  const latestSessionHasOfficialDiagnosis = useMemo(() => {
+    if (!latestSession) return false;
+    return parsePostVisitDiagnosis(latestSession.post_visit_diagnosis ?? null) !== null;
+  }, [latestSession]);
 
   const confirmDeleteSession =
     confirmDeleteSessionId && sessions
@@ -156,15 +188,29 @@ const DashboardPage: React.FC = () => {
                     </p>
                   </>
                 ) : latestSession ? (
-                  <>
-                    <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
-                      Review or update your latest symptom check
-                    </h3>
-                    <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
-                      Last documented {formatSessionTimestamp(latestSession.created_at)}. Open it
-                      to see details, or start fresh if something has changed.
-                    </p>
-                  </>
+                  latestSessionHasOfficialDiagnosis ? (
+                    <>
+                      <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
+                        Hello, {greetingDisplayName(userProfile, email)}. How are you feeling today?
+                      </h3>
+                      <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
+                        Your last visit is on record. Start a new check whenever you want to describe
+                        new or changing symptoms.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
+                        Add your doctor&apos;s diagnosis
+                      </h3>
+                      <p className="font-body text-primary-fixed-dim text-base max-w-md mb-8">
+                        Your latest symptom check is from{" "}
+                        {formatSessionTimestamp(latestSession.created_at)}. When you have seen a
+                        clinician, open it and record the official diagnosis you received—it completes
+                        your visit record and helps future checks use your history.
+                      </p>
+                    </>
+                  )
                 ) : (
                   <>
                     <h3 className="font-headline text-3xl md:text-4xl font-bold text-on-primary max-w-lg leading-tight mb-4">
@@ -195,21 +241,31 @@ const DashboardPage: React.FC = () => {
                     <span className="material-symbols-outlined text-lg">arrow_forward</span>
                   </Link>
                 ) : latestSession ? (
-                  <>
+                  latestSessionHasOfficialDiagnosis ? (
                     <Link
                       className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2"
-                      to={`/symptom-check?session=${encodeURIComponent(latestSession.session_id)}`}
-                    >
-                      Open latest check
-                      <span className="material-symbols-outlined text-lg">arrow_forward</span>
-                    </Link>
-                    <Link
-                      className="text-on-primary font-body font-medium hover:underline px-2 py-2"
                       to="/symptom-check"
                     >
                       New symptom check
+                      <span className="material-symbols-outlined text-lg">arrow_forward</span>
                     </Link>
-                  </>
+                  ) : (
+                    <>
+                      <Link
+                        className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2"
+                        to={`/symptom-check?session=${encodeURIComponent(latestSession.session_id)}`}
+                      >
+                        Add diagnosis
+                        <span className="material-symbols-outlined text-lg">arrow_forward</span>
+                      </Link>
+                      <Link
+                        className="text-on-primary font-body font-medium hover:underline px-2 py-2"
+                        to="/symptom-check"
+                      >
+                        New symptom check
+                      </Link>
+                    </>
+                  )
                 ) : (
                   <Link
                     className="bg-surface-container-lowest text-primary font-headline font-bold py-3 px-6 rounded shadow-sm hover:shadow-md transition-all flex items-center gap-2"
@@ -398,6 +454,7 @@ const DashboardPage: React.FC = () => {
                 ) : null}
                 <ul className="flex flex-col gap-4">
                 {sessions.map((s) => {
+                  const postVisitDx = parsePostVisitDiagnosis(s.post_visit_diagnosis ?? null);
                   const deletingThis =
                     deleteSession.isPending && deleteSession.variables === s.session_id;
                   return (
@@ -434,6 +491,16 @@ const DashboardPage: React.FC = () => {
                                   ? s.summary
                                   : "No summary recorded for this session yet."}
                               </p>
+                              {postVisitDx ? (
+                                <div className="mt-3 rounded-lg border border-secondary/25 bg-secondary-container/10 px-3 py-2">
+                                  <p className="font-headline text-[10px] font-bold uppercase tracking-wider text-secondary mb-0.5">
+                                    Post-visit Diagnosis
+                                  </p>
+                                  <p className="font-body text-xs text-on-surface line-clamp-2">
+                                    {postVisitDx.text}
+                                  </p>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         </Link>

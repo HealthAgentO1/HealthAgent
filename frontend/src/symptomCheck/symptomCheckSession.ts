@@ -61,6 +61,13 @@ export type SymptomCheckSessionSnapshot = {
   /** Cached price LLM output; paired with `priceEstimateCacheFingerprint`. */
   priceEstimate: PriceEstimatePayload | null;
   priceEstimateCacheFingerprint: string | null;
+  /** Step 1: user opted in to sending past official diagnoses to the first LLM call. */
+  includePriorDiagnosesInLlm: boolean;
+  /**
+   * Deduped labels saved when sessions were loaded (for resume replay of `followup` request).
+   * Mirrors `uniquePriorOfficialDiagnoses` at last persist.
+   */
+  priorOfficialDiagnosesSnapshot: string[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -87,6 +94,22 @@ function isPending(value: unknown): value is SymptomCheckPendingRequest {
 
 function emptyAddress(): UserAddressSnapshot {
   return { street: "", city: "", state: "", postalCode: "" };
+}
+
+function parsePriorOfficialDiagnosesSnapshot(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const x of raw) {
+    if (typeof x !== "string") continue;
+    const t = x.trim();
+    if (!t) continue;
+    const k = t.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(t);
+  }
+  return out;
 }
 
 function parseAddress(raw: unknown): UserAddressSnapshot | null {
@@ -172,6 +195,8 @@ function migrateV1ToV4(raw: LegacyV1Snapshot): SymptomCheckSessionSnapshot {
     surveyBackendSessionId: null,
     priceEstimate: null,
     priceEstimateCacheFingerprint: null,
+    includePriorDiagnosesInLlm: false,
+    priorOfficialDiagnosesSnapshot: [],
   };
 }
 
@@ -214,6 +239,8 @@ function migrateV2RecordToV4(raw: Record<string, unknown>): SymptomCheckSessionS
     surveyBackendSessionId,
     priceEstimate: null,
     priceEstimateCacheFingerprint: null,
+    includePriorDiagnosesInLlm: false,
+    priorOfficialDiagnosesSnapshot: [],
   };
 }
 
@@ -268,6 +295,11 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
 
   const { priceEstimate, priceEstimateCacheFingerprint } = parseStoredPriceFields(raw);
 
+  const includePriorDiagnosesInLlm = raw.includePriorDiagnosesInLlm === true;
+  const priorOfficialDiagnosesSnapshot = parsePriorOfficialDiagnosesSnapshot(
+    raw.priorOfficialDiagnosesSnapshot,
+  );
+
   return {
     version: SYMPTOM_CHECK_SESSION_VERSION,
     updatedAt: raw.updatedAt,
@@ -285,6 +317,8 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
     surveyBackendSessionId,
     priceEstimate,
     priceEstimateCacheFingerprint,
+    includePriorDiagnosesInLlm,
+    priorOfficialDiagnosesSnapshot,
   };
 }
 
