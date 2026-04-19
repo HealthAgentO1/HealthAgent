@@ -42,7 +42,7 @@ class Command(BaseCommand):
             "--insurer",
             type=str,
             default="",
-            help="Only process this insurer slug (centene|cigna|healthnet|fidelis)",
+            help="Only process this insurer slug (see manifest `slug` values, e.g. centene|cigna|healthnet|fidelis)",
         )
         parser.add_argument(
             "--max-files-per-insurer",

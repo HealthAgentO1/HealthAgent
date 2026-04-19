@@ -18,6 +18,8 @@ export type SymptomInsurerSlug =
   | "unitedhealthcare"
   | "elevance"
   | "humana"
+  | "bluecross"
+  | "aetna"
   | "other";
 
 export type NearbyFacilitiesRequest = {

@@ -38,6 +38,8 @@ INSURER_SLUGS = frozenset(
         "unitedhealthcare",
         "elevance",
         "humana",
+        "bluecross",
+        "aetna",
         "other",
     }
 )

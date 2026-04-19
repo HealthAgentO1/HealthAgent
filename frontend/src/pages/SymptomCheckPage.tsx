@@ -61,6 +61,8 @@ const INSURANCE_OPTIONS = [
   { id: "unitedhealthcare", label: "UnitedHealthcare" },
   { id: "elevance", label: "Elevance Health (Anthem)" },
   { id: "humana", label: "Humana" },
+  { id: "bluecross", label: "Blue Cross Blue Shield" },
+  { id: "aetna", label: "Aetna" },
   { id: "other", label: "Other / not listed" },
 ] as const;
 
@@ -146,9 +148,14 @@ function insuranceIdFromLabel(label: string): InsuranceId | "" {
     uhc: "unitedhealthcare",
     elevance: "elevance",
     anthem: "elevance",
-    aetna: "other",
-    "aetna cvs": "other",
+    aetna: "aetna",
+    "aetna cvs": "aetna",
+    "aetna cvs health": "aetna",
     wellcare: "elevance",
+    bcbs: "bluecross",
+    "blue cross": "bluecross",
+    "blue shield": "bluecross",
+    "blue cross blue shield": "bluecross",
   };
   if (legacy[t]) return legacy[t];
   for (const o of INSURANCE_OPTIONS) {
