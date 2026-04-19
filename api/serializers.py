@@ -86,5 +86,17 @@ class MedicationProfileExtractResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MedicationProfile
-        fields = ["id", "medications_raw", "extracted_medications", "created_at"]
-        read_only_fields = ["id", "medications_raw", "extracted_medications", "created_at"]
+        fields = [
+            "id",
+            "medications_raw",
+            "extracted_medications",
+            "interaction_results",
+            "created_at",
+        ]
+        read_only_fields = [
+            "id",
+            "medications_raw",
+            "extracted_medications",
+            "interaction_results",
+            "created_at",
+        ]

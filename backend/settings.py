@@ -196,3 +196,12 @@ LLM_MAX_INPUT_TOKENS = int(os.environ.get("LLM_MAX_INPUT_TOKENS", "12000"))
 
 # NLM RxNav (no key) — resolves drug names to RxNorm RxCUIs when the LLM omits RxCUI.
 RXNAV_REST_BASE = os.environ.get("RXNAV_REST_BASE", "https://rxnav.nlm.nih.gov/REST").strip()
+
+# openFDA drug labels (pairwise interaction text from SPL section 7). Optional API key raises rate limits.
+OPENFDA_API_KEY = os.environ.get("OPENFDA_API_KEY", "").strip()
+OPENFDA_LABEL_URL = os.environ.get(
+    "OPENFDA_LABEL_URL",
+    "https://api.fda.gov/drug/label.json",
+).strip()
+OPENFDA_REQUEST_TIMEOUT = int(os.environ.get("OPENFDA_REQUEST_TIMEOUT", "25"))
+OPENFDA_CACHE_TTL_SECONDS = int(os.environ.get("OPENFDA_CACHE_TTL_SECONDS", str(86_400)))
