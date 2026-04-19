@@ -27,9 +27,10 @@ class UserSymptomSessionsListView(generics.ListAPIView):
         )
 
 
-class UserSymptomSessionRetrieveView(generics.RetrieveAPIView):
+class UserSymptomSessionRetrieveView(generics.RetrieveDestroyAPIView):
     """
     GET /api/sessions/<uuid>/ — resume payload for Symptom Check deep links from the dashboard.
+    DELETE /api/sessions/<uuid>/ — remove one saved session (same auth and ownership rules as GET).
     """
 
     serializer_class = SymptomSessionResumeSerializer

@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 
 from .models import MedicationProfile
 from .serializers import MedicationProfileExtractResponseSerializer
+from .services.medication_check_service import run_medication_check
 from .services.medication_extraction import MedicationLlmError, extract_medications_with_rxnorm
 from .services.openfda_interactions import compute_pairwise_interactions
 
@@ -75,3 +76,46 @@ class MedicationProfileExtractView(APIView):
 
         data = MedicationProfileExtractResponseSerializer(profile).data
         return Response(data, status=status.HTTP_201_CREATED)
+
+
+class MedicationCheckView(APIView):
+    """
+    POST /api/medication/check/
+
+    Runs extraction, pairwise FDA label interaction hints, openFDA enforcement recalls,
+    and an aggregate safety score; persists a ``MedicationProfile`` like extract-only.
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        text = request.data.get("medications_text")
+        if text is None:
+            text = request.data.get("text")
+        if not isinstance(text, str) or not text.strip():
+            return Response(
+                {"error": "Provide non-empty `medications_text` (or `text`)."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not getattr(settings, "OPENAI_API_KEY", None):
+            return Response(
+                {
+                    "error": (
+                        "LLM API is not configured. Set OPENAI_API_KEY or DEEPSEEK_API_KEY "
+                        "(and OPENAI_BASE_URL / LLM_MODEL if not using defaults)."
+                    ),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        raw = text.strip()
+        try:
+            payload = run_medication_check(request.user, raw)
+        except MedicationLlmError as exc:
+            return Response(
+                {"error": str(exc)},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(payload, status=status.HTTP_201_CREATED)

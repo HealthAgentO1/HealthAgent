@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { useSymptomSessions } from "../api/queries";
+import { useDeleteSymptomSession, useSymptomSessions } from "../api/queries";
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -34,6 +34,7 @@ function triageLabel(level: string | null): string {
 
 const DashboardPage: React.FC = () => {
   const { data: sessions, isLoading, isError, error } = useSymptomSessions();
+  const deleteSession = useDeleteSymptomSession();
   return (
     <div className="p-6 md:p-10 lg:p-12">
       <div className="max-w-6xl mx-auto space-y-8">
@@ -233,48 +234,88 @@ const DashboardPage: React.FC = () => {
                 </Link>
               </div>
             ) : (
-              <ul className="flex flex-col gap-4">
-                {sessions.map((s) => (
-                  <li key={s.session_id}>
-                    <Link
-                      aria-label={`Open symptom session from ${formatSessionTimestamp(s.created_at)}`}
-                      className="block bg-surface-container-lowest rounded-xl p-5 md:p-6 shadow-ambient border-ghost hover:bg-surface-bright transition-colors duration-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                      to={`/symptom-check?session=${encodeURIComponent(s.session_id)}`}
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-                        <div className="flex items-start gap-4 min-w-0 flex-1">
-                          <div className="w-12 h-12 rounded-full bg-secondary-container/40 text-on-secondary-container flex items-center justify-center shrink-0">
-                            <span className="material-symbols-outlined icon-fill">chat</span>
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex flex-wrap items-center gap-2 mb-2">
-                              <span
-                                className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${triageBadgeClasses(s.triage_level)}`}
-                              >
-                                {triageLabel(s.triage_level)}
-                              </span>
-                              <span className="font-body text-xs text-on-surface-variant">
-                                {formatSessionTimestamp(s.created_at)}
-                              </span>
-                              <span className="font-body text-xs font-semibold text-primary">
-                                Open
-                                <span className="material-symbols-outlined text-sm align-middle ml-0.5">
-                                  chevron_right
-                                </span>
-                              </span>
+              <div className="flex flex-col gap-4">
+                {deleteSession.isError ? (
+                  <div
+                    className="rounded-xl border border-error-container/40 bg-error-container/10 px-4 py-3 font-body text-sm text-on-error-container"
+                    role="alert"
+                  >
+                    {deleteSession.error instanceof Error
+                      ? deleteSession.error.message
+                      : "Could not delete that session. Try again."}
+                  </div>
+                ) : null}
+                <ul className="flex flex-col gap-4">
+                {sessions.map((s) => {
+                  const deletingThis =
+                    deleteSession.isPending && deleteSession.variables === s.session_id;
+                  return (
+                    <li key={s.session_id} className="group">
+                      <div className="flex items-stretch rounded-xl shadow-ambient border-ghost bg-surface-container-lowest hover:bg-surface-bright transition-colors duration-200 overflow-hidden focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 focus-within:ring-offset-surface-container-lowest">
+                        <Link
+                          aria-label={`Open symptom session from ${formatSessionTimestamp(s.created_at)}`}
+                          className="flex flex-1 min-w-0 flex-col sm:flex-row sm:items-start sm:justify-between gap-4 p-5 md:p-6 outline-none"
+                          to={`/symptom-check?session=${encodeURIComponent(s.session_id)}`}
+                        >
+                          <div className="flex items-start gap-4 min-w-0 flex-1">
+                            <div className="w-12 h-12 rounded-full bg-secondary-container/40 text-on-secondary-container flex items-center justify-center shrink-0">
+                              <span className="material-symbols-outlined icon-fill">chat</span>
                             </div>
-                            <p className="font-body text-sm text-on-surface line-clamp-3">
-                              {s.summary.trim()
-                                ? s.summary
-                                : "No summary recorded for this session yet."}
-                            </p>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap items-center gap-2 mb-2">
+                                <span
+                                  className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${triageBadgeClasses(s.triage_level)}`}
+                                >
+                                  {triageLabel(s.triage_level)}
+                                </span>
+                                <span className="font-body text-xs text-on-surface-variant">
+                                  {formatSessionTimestamp(s.created_at)}
+                                </span>
+                                <span className="font-body text-xs font-semibold text-primary">
+                                  Open
+                                  <span className="material-symbols-outlined text-sm align-middle ml-0.5">
+                                    chevron_right
+                                  </span>
+                                </span>
+                              </div>
+                              <p className="font-body text-sm text-on-surface line-clamp-3">
+                                {s.summary.trim()
+                                  ? s.summary
+                                  : "No summary recorded for this session yet."}
+                              </p>
+                            </div>
                           </div>
+                        </Link>
+                        <div className="flex items-center shrink-0 border-l border-outline-variant/20 bg-surface-container-lowest group-hover:bg-surface-bright pl-1 pr-2 md:pr-3">
+                          <button
+                            type="button"
+                            className="flex h-10 w-10 items-center justify-center rounded-lg border border-error/40 bg-error/10 text-error hover:bg-error/20 disabled:cursor-not-allowed disabled:opacity-50 opacity-100 md:opacity-0 md:pointer-events-none md:group-hover:opacity-100 md:group-hover:pointer-events-auto md:group-focus-within:opacity-100 md:group-focus-within:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-error"
+                            aria-label="Delete this symptom check"
+                            disabled={deletingThis}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (
+                                !window.confirm(
+                                  "Delete this symptom check? You will not be able to recover it.",
+                                )
+                              ) {
+                                return;
+                              }
+                              deleteSession.mutate(s.session_id);
+                            }}
+                          >
+                            <span className="material-symbols-outlined text-[22px]" aria-hidden>
+                              delete
+                            </span>
+                          </button>
                         </div>
                       </div>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
+                    </li>
+                  );
+                })}
+                </ul>
+              </div>
             )}
           </div>
         </div>

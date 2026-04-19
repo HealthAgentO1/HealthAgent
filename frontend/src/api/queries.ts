@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "./client";
 
 // Define the shape of our provider data
@@ -67,6 +67,20 @@ export const useSymptomSessions = () => {
   return useQuery({
     queryKey: ["symptom-sessions"],
     queryFn: fetchSymptomSessions,
+  });
+};
+
+export async function deleteSymptomSession(sessionId: string): Promise<void> {
+  await apiClient.delete(`/sessions/${sessionId}/`);
+}
+
+export const useDeleteSymptomSession = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteSymptomSession,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["symptom-sessions"] });
+    },
   });
 };
 
