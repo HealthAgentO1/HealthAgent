@@ -32,7 +32,7 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'django-insecure-g6j5$k46w1$yyx
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
-ALLOWED_HOSTS = ["*"] # Be more restrictive in production with real domain
+ALLOWED_HOSTS = ["*", "health-os-ai.com", "www.health-os-ai.com"] # Be more restrictive in production with real domain
 
 
 # Application definition
@@ -67,6 +67,8 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:8000",
+    "https://health-os-ai.com",
+    "https://www.health-os-ai.com",
 ]
 
 # Add production frontend URL from environment variable

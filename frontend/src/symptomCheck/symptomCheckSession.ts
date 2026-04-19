@@ -12,7 +12,8 @@ import type { FollowUpQuestion, FollowUpAnswer, SymptomResultsPayload } from "./
 /** Bump when the persisted shape changes incompatibly. */
 export const SYMPTOM_CHECK_SESSION_VERSION = 3 as const;
 
-const STORAGE_KEY = "healthagent.symptom_check.session.v1";
+const STORAGE_KEY = "healthos.symptom_check.session.v1";
+const LEGACY_STORAGE_KEY = "healthagent.symptom_check.session.v1";
 
 export type SymptomCheckFlowStep = "intake" | "followup" | "followup_round_2" | "results";
 
@@ -255,10 +256,25 @@ function parseSnapshot(raw: unknown): SymptomCheckSessionSnapshot | null {
 export function readSymptomCheckSession(): SymptomCheckSessionSnapshot | null {
   if (typeof window === "undefined" || !window.localStorage) return null;
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw === null || raw.trim() === "") return null;
+    let raw = window.localStorage.getItem(STORAGE_KEY);
+    let fromLegacy = false;
+    if (raw === null || raw.trim() === "") {
+      const legacy = window.localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (legacy === null || legacy.trim() === "") return null;
+      raw = legacy;
+      fromLegacy = true;
+    }
     const parsed: unknown = JSON.parse(raw);
-    return parseSnapshot(parsed);
+    const snapshot = parseSnapshot(parsed);
+    if (snapshot && fromLegacy) {
+      try {
+        window.localStorage.setItem(STORAGE_KEY, raw);
+        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        /* ignore migration write failures */
+      }
+    }
+    return snapshot;
   } catch {
     return null;
   }
@@ -277,6 +293,7 @@ export function clearSymptomCheckSession(): void {
   if (typeof window === "undefined" || !window.localStorage) return;
   try {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     /* ignore */
   }

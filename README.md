@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="frontend/public/logo.png" alt="HealthAgent logo" width="200" />
+<img src="frontend/public/icon.png" alt="HealthOS logo" width="200" />
 
-# HealthAgent
+# HealthOS
 
 **Autonomous symptom-to-care and medication safety**
 
@@ -10,9 +10,9 @@ AI-assisted triage, care routing, and medication monitoring — backed by a Djan
 
 <br />
 
-<img src="images/group_photo.png" alt="HealthAgent team" width="720" />
+<img src="images/group_photo.jpeg" alt="HealthOS team" width="720" />
 
-*The team behind HealthAgent*
+*The team behind HealthOS*
 
 <br />
 
@@ -22,14 +22,14 @@ AI-assisted triage, care routing, and medication monitoring — backed by a Djan
 
 ## Overview
 
-HealthAgent combines two complementary flows:
+HealthOS combines two complementary flows:
 
 | Area | What it does |
 |------|----------------|
 | **Symptom-to-care** | Guided symptom intake, triage-style assessment, care setting suggestions, and pre-visit context for clinicians. |
 | **Medication safety** | Active regimen tracking in the browser, interaction checks (e.g. openFDA), and safety-oriented medication workflows. |
 
-The stack is a **Django REST** backend with **PostgreSQL**, and a **React + TypeScript + Vite** frontend. See `docs/` for deeper architecture and agent notes.
+The stack is a **Django REST** backend with **PostgreSQL**, a **DeepSeek**-hosted LLM (OpenAI-compatible HTTPS), and a **React + TypeScript + Vite** frontend. **Docker Compose** runs the **database and Django API** together (see `docker-compose.yml`). The **frontend** is usually run on the host with Vite. See `docs/` for deeper architecture and agent notes.
 
 ---
 
@@ -64,102 +64,126 @@ The stack is a **Django REST** backend with **PostgreSQL**, and a **React + Type
 
 Colored icons below point at **SVG** assets (CDN). Same technologies are spelled out in text for screen readers and offline docs.
 
-<!-- Icon base: Devicons v2.16.0 (SVG). Vite: project logo. -->
+<!-- Devicons v2.16.0 (SVG). DeepSeek whale: `images/tech/deepseek-whale.svg` (icon path from Wikimedia Commons File:DeepSeek_logo.svg). -->
 
 <div align="center">
 
 <table>
   <tr>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/python/python-original.svg" alt="Python" title="Python" />
       <div><sub><b>Python</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/django/django-plain.svg" alt="Django" title="Django" />
       <div><sub><b>Django</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/postgresql/postgresql-original.svg" alt="PostgreSQL" title="PostgreSQL" />
       <div><sub><b>PostgreSQL</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/docker/docker-plain.svg" alt="Docker" title="Docker" />
       <div><sub><b>Docker</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/react/react-original.svg" alt="React" title="React" />
       <div><sub><b>React</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/typescript/typescript-original.svg" alt="TypeScript" title="TypeScript" />
       <div><sub><b>TypeScript</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/vite/vite-original.svg" alt="Vite" title="Vite" />
       <div><sub><b>Vite</b></sub></div>
     </td>
-    <td align="center" width="88">
+    <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/tailwindcss/tailwindcss-original.svg" alt="Tailwind CSS" title="Tailwind CSS" />
       <div><sub><b>Tailwind</b></sub></div>
+    </td>
+    <td align="center" width="88">
+      <img height="44" width="44" src="images/tech/deepseek-whale.svg" alt="DeepSeek" title="DeepSeek" />
+      <div><sub><b>DeepSeek</b></sub></div>
     </td>
   </tr>
 </table>
 
-<sub>Python · Django · PostgreSQL · Docker · React · TypeScript · Vite · Tailwind CSS</sub>
+<sub>Python · Django · PostgreSQL · Docker · React · TypeScript · Vite · Tailwind CSS · DeepSeek</sub><br />
+<sub>DeepSeek whale icon derived from <a href="https://commons.wikimedia.org/wiki/File:DeepSeek_logo.svg">Wikimedia Commons</a> (wordmark removed; see file page for license / trademark).</sub>
 
 </div>
 
 | Layer | Technologies |
 |--------|----------------|
 | **Backend** | Django 4.2, **Django REST Framework**, **SimpleJWT**, CORS headers, **Gunicorn**, **WhiteNoise**, **psycopg2**, `dj-database-url` |
-| **AI & HTTP** | `openai`, `anthropic`, `requests`, `tiktoken`, `python-dotenv` (provider keys from `.env`) |
+| **LLM** | **DeepSeek** **`deepseek-chat`** (`LLM_MODEL`). The backend calls DeepSeek’s **OpenAI-compatible** REST API using the official **`openai`** Python package as the HTTP client (`OPENAI_BASE_URL` / `DEEPSEEK_API_BASE`, keys via **`DEEPSEEK_API_KEY`** or **`OPENAI_API_KEY`** — see **`.env.example`**). **`tiktoken`** where token utilities are needed. |
+| **HTTP & config** | **`requests`** for external REST (e.g. openFDA, NPPES, Infermedica). **`python-dotenv`** and Django settings for environment. |
 | **Frontend** | React 19, React Router 7, **TanStack Query**, **Axios**, Tailwind CSS 4 (`@tailwindcss/vite`), ESLint, TypeScript |
-| **Tooling** | Vite 8, ESLint, **`npm run build`** (typecheck + bundle), **pytest** for the API, Docker Compose for local full stack |
+| **Tooling** | Vite 8, ESLint, **`npm run build`** (typecheck + bundle), **pytest** for the API, **Docker Compose** for local **Postgres + Django** |
 
 ---
 
 ## Architecture
 
-Two agent areas share the same API and database:
+Two agent areas share the same API and database. **Locally, Compose runs Postgres and Django**; the React app usually talks to the API from the host.
 
 ```
-frontend (React / TypeScript)
-    └── Django REST API
-            ├── Symptom-to-Care
-            │       ├── Infermedica     (triage)
-            │       ├── NPPES           (provider search)
-            │       ├── Healthcare.gov (insurance context)
-            │       └── Booking + pre-visit report
-            └── Medication Safety
-                    ├── Lexigram        (NLP extraction)
-                    ├── openFDA         (interactions, recalls)
-                    └── Alerts + safer alternatives
+Docker Compose (docker compose up)
+├── db          PostgreSQL 14 — port 5432, persistent volume
+└── django      Django REST API — port 8000, migrate on start, bind-mounted source
+
+frontend (Vite dev server on host) ──HTTP──► django:8000
+
+Django REST API
+├── Symptom-to-Care
+│       ├── Infermedica     (triage)
+│       ├── NPPES           (provider search)
+│       ├── Healthcare.gov (insurance context)
+│       └── Booking + pre-visit report
+└── Medication Safety
+        ├── Lexigram        (NLP extraction)
+        ├── openFDA         (interactions, recalls)
+        └── Alerts + safer alternatives
 ```
 
 ---
 
 ## Getting started
 
+Local development is **Compose-first for the backend and database**: one command brings up **PostgreSQL** and **Django** with the right wiring (`POSTGRES_HOST=db`, health-checked `depends_on`, etc.). Run the **frontend** separately with Node so you get a normal Vite HMR workflow.
+
 ### Prerequisites
 
-- Python 3.10+
-- Node.js (for the frontend)
-- PostgreSQL (if you run the backend on the host instead of Docker)
-- API keys as described in `.env.example` (for example DeepSeek for the core AI agent)
+- **Docker Engine** and the **Docker Compose** plugin (`docker compose`)
+- **Node.js** (current LTS is fine) for the Vite frontend
+- A root **`.env`** copied from **`.env.example`** and filled in (`DJANGO_SECRET_KEY`, Postgres variables, **`DEEPSEEK_API_KEY`** / **`OPENAI_*`** for the LLM, and any other keys your features need). Never commit `.env`.
 
-### Backend (host)
+Optional: **Python 3.11+** on the host only if you want to run **`manage.py`** or **`pytest`** outside the container (see below; aligns with **`Dockerfile`**).
 
-From the **repository root** (where `manage.py` lives):
+### 1. Backend and database (Docker Compose)
+
+From the **repository root** (where `docker-compose.yml` and `manage.py` live):
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
 cp .env.example .env
-python manage.py migrate
-python manage.py runserver
+# Edit .env — secrets, DB names, API keys (never commit .env)
+
+docker compose up --build
 ```
 
-### Frontend
+This starts two services (see **`docker-compose.yml`**):
+
+| Service | Role |
+|---------|------|
+| **`db`** | **PostgreSQL 14** — published on **`localhost:5432`**, data in the `postgres_data` volume, healthcheck for clean startup order. |
+| **`django`** | **Django REST API** — image built from the repo **`Dockerfile`**, runs **`migrate --noinput`** then **`runserver 0.0.0.0:8000`**, published on **`http://127.0.0.1:8000`**, loads **`env_file: .env`**, and sets **`POSTGRES_HOST=db`** so the app uses the Compose network (you normally do **not** point `POSTGRES_HOST` at `localhost` for this stack). |
+
+The repo is **bind-mounted** into the `django` container (`volumes: - .:/app`), so code changes on the host are picked up by the dev server inside the container.
+
+### 2. Frontend (host)
+
+In another terminal:
 
 ```bash
 cd frontend
@@ -167,28 +191,19 @@ npm install
 npm run dev
 ```
 
-Optional: create `frontend/.env` or `frontend/.env.local` with **`VITE_API_URL`** (Django API base URL, e.g. `http://127.0.0.1:8000/api`). Symptom check uses **`POST /api/symptom/survey-llm/`** with JWT auth; see `docs/sympton-to-care.md`. Medication safety uses **`POST /api/medication-profile/extract/`** for LLM extraction when adding a prescription; regimen rows are stored in **`localStorage`** in the browser (see `docs/architecture.md` and `docs/medication-safety.md`).
+Point the UI at the Compose-backed API by setting **`VITE_API_URL=http://127.0.0.1:8000/api`** in **`frontend/.env`** or **`frontend/.env.local`**.
 
-### Full stack with Docker (Postgres + Django)
+- Symptom check: **`POST /api/symptom/survey-llm/`** with JWT — see **`docs/sympton-to-care.md`**.
+- Medication extraction: **`POST /api/medication-profile/extract/`**; active regimen rows live in **`localStorage`** — see **`docs/architecture.md`** and **`docs/medication-safety.md`**.
 
-Uses `.env` at the repo root for `DJANGO_SECRET_KEY`, database passwords, `DEEPSEEK_API_KEY`, and other variables. Compose sets `POSTGRES_HOST` so the app reaches the `db` service; you do not need to change that in `.env` for Docker.
+### Backend without Docker (optional)
 
-```bash
-cp .env.example .env
-# Edit .env: set DJANGO_SECRET_KEY and any API keys (never commit .env)
-
-docker compose up --build
-```
-
-- **API:** `http://127.0.0.1:8000` (Django runs `migrate` on startup, then `runserver` with live reload; the project directory is bind-mounted into the container).
-- **Postgres:** `localhost:5432` (credentials match `.env`).
-
-For the UI, run Vite on the host (`cd frontend && npm run dev`) and point it at the API with `VITE_API_URL=http://127.0.0.1:8000/api` in `frontend/.env` when needed.
+If you need Django or tests directly on the host: create a virtualenv, **`pip install -r requirements.txt`**, configure **`POSTGRES_*`** (or `DATABASE_URL`) to reach a Postgres instance (for example the **`db`** container while Compose is running), then run **`python manage.py migrate`** and **`python manage.py runserver`** from the repo root. Match the Python version to the **`Dockerfile`** (currently **3.11**) when debugging environment-specific issues.
 
 ---
 
 ## Contributing
 
-- **Tests / quality:** `pytest` (backend); `npm run lint` and `npm run build` in `frontend/` for the UI.
+- **Tests / quality:** `pytest` for the API (usually from a **host virtualenv** with `requirements.txt` and `pytest` installed); `npm run lint` and `npm run build` in `frontend/` for the UI. For one-off Django commands against the Compose stack: **`docker compose exec django python manage.py …`** while `django` is running.
 - **Branches:** use `feat/`, `fix/`, or `chore/` prefixes.
 - **Pull requests:** require at least one reviewer before merge.

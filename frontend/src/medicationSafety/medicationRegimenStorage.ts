@@ -1,6 +1,7 @@
 import type { ActiveMedication } from "./types";
 
-const STORAGE_KEY = "healthagent_active_regimen_v1";
+const STORAGE_KEY = "healthos_active_regimen_v1";
+const LEGACY_STORAGE_KEY = "healthagent_active_regimen_v1";
 
 function isActiveMedication(x: unknown): x is ActiveMedication {
   if (!x || typeof x !== "object") return false;
@@ -29,7 +30,14 @@ function isActiveMedication(x: unknown): x is ActiveMedication {
 
 export function loadActiveRegimen(): ActiveMedication[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+      if (raw) {
+        localStorage.setItem(STORAGE_KEY, raw);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      }
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -45,6 +53,7 @@ export function loadActiveRegimen(): ActiveMedication[] {
 
 export function saveActiveRegimen(meds: ActiveMedication[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(meds));
+  localStorage.removeItem(LEGACY_STORAGE_KEY);
 }
 
 export function upsertMedication(med: ActiveMedication): void {
