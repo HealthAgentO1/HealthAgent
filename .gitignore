@@ -32,3 +32,4 @@ db.sqlite3
 .idea/
 backend/__pycache__/settings.cpython-310.pyc
 scripts/gcp-key.json
+.DS_Store
