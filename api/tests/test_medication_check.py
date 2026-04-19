@@ -51,7 +51,7 @@ class MedicationCheckAPITests(APITestCase):
                     "drug_a": "Aspirin",
                     "drug_b": "Warfarin",
                     "has_interaction": True,
-                    "severity": "major",
+                    "severity": "severe",
                     "description": "Bleeding risk.",
                 }
             ],
@@ -90,7 +90,7 @@ class MedicationCheckAPITests(APITestCase):
         score = data["safety_score"]
         self.assertIn(score["level"], ("low", "moderate", "high"))
         self.assertIsInstance(score["numeric"], int)
-        self.assertEqual(score["factors"]["interaction_major"], 1)
+        self.assertEqual(score["factors"]["interaction_severe"], 1)
         self.assertEqual(score["factors"]["recall_class_ii"], 1)
         self.assertIn("summary", score)
 
