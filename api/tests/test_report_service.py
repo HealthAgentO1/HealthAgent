@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase
 
 from api.models import MedicationProfile, SymptomSession
-from api.services.report_service import build_pre_visit_report
+from api.services.report_service import build_pre_visit_report, merge_profile_and_llm_medications
 
 User = get_user_model()
 
@@ -77,3 +77,39 @@ class ReportServiceTests(TestCase):
 
         self.assertEqual(report["medications"], ["Lisinopril", "Metformin"])
         mock_complete.assert_called_once()
+
+    @patch("api.services.report_service.complete_llm_chat")
+    def test_build_pre_visit_report_merges_profile_and_llm_medications(self, mock_complete):
+        session = SymptomSession.objects.create(
+            user=self.user,
+            ai_conversation_log=[
+                {"role": "user", "content": "Headache.", "timestamp": "2026-01-01T00:00:00Z"},
+            ],
+            triage_level="routine",
+        )
+        MedicationProfile.objects.create(
+            user=self.user,
+            medications_raw="Lisinopril",
+            extracted_medications=[{"name": "Lisinopril"}],
+        )
+        mock_complete.return_value = json.dumps(
+            {
+                "chief_complaint": "Headache.",
+                "hpi": "Patient reports headache.",
+                "triage_level": "routine",
+                "patient_description": "Adult.",
+                "risk_factors": [],
+                "medications": ["Aspirin", "lisinopril"],
+            }
+        )
+
+        report = build_pre_visit_report(session)
+
+        self.assertEqual(report["medications"], ["Lisinopril", "Aspirin"])
+
+    def test_merge_profile_and_llm_medications_dedupes_case_insensitive(self):
+        merged = merge_profile_and_llm_medications(
+            ["Lisinopril", "Metformin"],
+            ["metformin", "Aspirin"],
+        )
+        self.assertEqual(merged, ["Lisinopril", "Metformin", "Aspirin"])
