@@ -64,7 +64,35 @@ class MedicationProfileExtractApiTests(TestCase):
         self.assertEqual(res.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res.data["medications_raw"], "baby aspirin")
         self.assertEqual(len(res.data["extracted_medications"]), 1)
+        self.assertIsNone(res.data.get("interaction_results"))
         self.assertEqual(MedicationProfile.objects.filter(user=self.user).count(), 1)
+
+    @patch("api.views_medication.compute_pairwise_interactions")
+    @patch("api.views_medication.extract_medications_with_rxnorm")
+    def test_post_saves_interaction_results_when_two_or_more_meds(
+        self,
+        mock_extract,
+        mock_pairwise,
+    ):
+        mock_extract.return_value = [
+            {"name": "Lisinopril", "rxnorm_id": "29046"},
+            {"name": "Ibuprofen", "rxnorm_id": "5640"},
+        ]
+        mock_pairwise.return_value = {
+            "source": "openfda_drug_label",
+            "pairwise": [],
+            "pairs_checked": 1,
+        }
+        res = self.client.post(
+            "/api/medication-profile/extract/",
+            {"medications_text": "lisinopril and ibuprofen"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["interaction_results"]["pairs_checked"], 1)
+        profile = MedicationProfile.objects.get(pk=res.data["id"])
+        self.assertEqual(profile.interaction_results["source"], "openfda_drug_label")
+        mock_pairwise.assert_called_once()
 
     def test_post_requires_llm_key(self):
         factory = APIRequestFactory()
