@@ -123,10 +123,6 @@ export function validateFollowUpQuestionsPayload(
     questions.push(base);
   }
 
-  if (questions.length === 0) {
-    throw new Error("Invalid follow-up payload: questions array is empty.");
-  }
-
   return { questions };
 }
 

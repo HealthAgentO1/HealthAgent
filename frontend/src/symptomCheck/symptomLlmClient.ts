@@ -107,8 +107,8 @@ export async function requestSecondFollowUpQuestions(input: {
     },
   };
 
-  const raw = await postSymptomSurveyLlm(body);
-  const parsed = parseJsonObjectFromLlm(raw);
+  const res = await postSymptomSurveyLlm(body);
+  const parsed = parseJsonObjectFromLlm(res.raw_text);
   return validateFollowUpQuestionsPayload(parsed);
 }
 
