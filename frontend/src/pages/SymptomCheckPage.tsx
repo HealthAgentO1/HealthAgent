@@ -34,12 +34,10 @@ import {
   userAddressFromResumePracticeLocation,
   type PracticeLocationPayload,
 } from '../symptomCheck/practiceLocation';
-
 import {
   buildGoogleMapsUrl,
   requestNearbyFacilities,
   type NearbyFacility,
-  type SymptomInsurerSlug,
 } from '../symptomCheck/nppesFacilitiesClient';
 import { priceEstimateCacheFingerprint } from '../symptomCheck/priceEstimateCache';
 import { PRICE_ESTIMATE_STATIC_DISCLAIMER_PARAGRAPHS } from '../symptomCheck/priceEstimateStaticDisclaimer';
@@ -50,7 +48,6 @@ import {
   type AddressFieldKey,
 } from '../symptomCheck/UserAddressFormFields';
 import { type UsStateCode } from '../symptomCheck/usStates';
-
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
@@ -76,6 +73,7 @@ import {
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from '../symptomCheck/symptomCheckSession';
+import { scrollAppToTop } from '../utils/scrollAppToTop';
 
 const INSURANCE_OPTIONS = [
   { id: 'centene', label: 'Centene / Ambetter' },
@@ -251,15 +249,6 @@ function severityStyles(level: string): string {
   return 'bg-teal-500/12 text-teal-800 border border-teal-400/35';
 }
 
-/** App content scrolls inside `Layout`'s `<main>`; reset both so each flow step starts at the top. */
-function scrollAppToTop(): void {
-  const run = () => {
-    document.querySelector('main')?.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  };
-  run();
-  requestAnimationFrame(run);
-}
 
 /** Step 1 welcome vs questionnaire form (not persisted; URL session and resume skip welcome). */
 type IntakeSubstep = 'welcome' | 'form';
@@ -297,7 +286,6 @@ const SymptomCheckPage: React.FC = () => {
   const [saveDefaultAddrNotice, setSaveDefaultAddrNotice] = useState<
     { kind: 'success' } | { kind: 'error'; message: string } | null
   >(null);
-
   // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<
@@ -395,16 +383,9 @@ const SymptomCheckPage: React.FC = () => {
 
   /** If step-1 address is empty and the user has not cleared intentionally, prefill from account `default_address`. */
   useEffect(() => {
-    if (sessionGate !== "ready") return;
+    if (sessionGate !== 'ready') return;
     if (urlSessionHydrating) return;
-    if (
-      step !== "intake" &&
-      step !== "followup" &&
-      step !== "followup_round_2" &&
-      step !== "results"
-    ) {
-      return;
-    }
+    if (step !== 'intake') return;
     if (suppressProfileAutofillRef.current) return;
     if (
       userAddress.street ||
@@ -965,7 +946,6 @@ const SymptomCheckPage: React.FC = () => {
     suppressProfileAutofillRef.current = false;
     setAddressAutofilledFromProfile(false);
     setSaveDefaultAddrNotice(null);
-
     setStep(snap.step);
     setSymptoms(snap.symptoms);
     setInsurance(insId);
@@ -981,7 +961,9 @@ const SymptomCheckPage: React.FC = () => {
       migrateLegacyMultiChoiceAnswers(snap.followUpAnswers, snap.followUpQuestions),
     );
     setSecondFollowUpQuestions(snap.secondFollowUpQuestions);
-    setSecondFollowUpAnswers(snap.secondFollowUpAnswers);
+    setSecondFollowUpAnswers(
+      migrateLegacyMultiChoiceAnswers(snap.secondFollowUpAnswers, snap.secondFollowUpQuestions),
+    );
     setResults(
       snap.results
         ? {
@@ -996,6 +978,37 @@ const SymptomCheckPage: React.FC = () => {
     setPriceEstimateCacheFingerprintState(snap.priceEstimateCacheFingerprint ?? null);
     setPendingRequest(null);
     setIntakeSubstep('form');
+  };
+
+  const handleClearAddressFields = () => {
+    suppressProfileAutofillRef.current = true;
+    setAddressAutofilledFromProfile(false);
+    setSaveDefaultAddrNotice(null);
+    setUserAddress({ street: "", city: "", state: "", postalCode: "" });
+    setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
+  };
+
+  /** Persists the current step-1 address to `PATCH /auth/me/` as `default_address` (requires a valid address). */
+  const handleSaveAsDefaultAddress = async () => {
+    if (!addressValidation.valid) return;
+    setSaveDefaultAddrBusy(true);
+    setSaveDefaultAddrNotice(null);
+    try {
+      await updateUserProfile({
+        default_address: userAddressToDefaultPayload(userAddress),
+      });
+      setSaveDefaultAddrNotice({ kind: "success" });
+      window.setTimeout(() => setSaveDefaultAddrNotice(null), 4000);
+    } catch (e) {
+      let msg = "Could not save. Try again.";
+      if (isAxiosError(e) && e.response?.data) {
+        const d = e.response.data as Record<string, unknown>;
+        if (typeof d.detail === "string") msg = d.detail;
+      }
+      setSaveDefaultAddrNotice({ kind: "error", message: msg });
+    } finally {
+      setSaveDefaultAddrBusy(false);
+    }
   };
 
   const handleClearAddressFields = () => {
@@ -1076,7 +1089,6 @@ const SymptomCheckPage: React.FC = () => {
     setSymptoms('');
     setInsurance('');
     setUserAddress({ street: '', city: '', state: '', postalCode: '' });
-
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
@@ -1105,7 +1117,6 @@ const SymptomCheckPage: React.FC = () => {
     setSymptoms('');
     setInsurance('');
     setUserAddress({ street: '', city: '', state: '', postalCode: '' });
-
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
@@ -2454,12 +2465,9 @@ const SymptomCheckPage: React.FC = () => {
                       await queryClient.refetchQueries({
                         queryKey: ['symptom-sessions'],
                       });
-                      navigate(
-                        `/reports?session=${encodeURIComponent(surveyBackendSessionId)}`,
-                        {
-                          state: { scrollToTop: true },
-                        },
-                      );
+                      navigate(`/reports?session=${encodeURIComponent(surveyBackendSessionId)}`, {
+                        state: { scrollToTop: true },
+                      });
                     })();
                   }}
                 >

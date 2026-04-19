@@ -174,7 +174,6 @@ export function DrugInteractionConflictsPanel({ loading, error, data }: Props) {
         </div>
 
         <p className="text-xs text-on-surface-variant font-body mb-4 relative z-10 border-l-2 border-primary/25 pl-3 leading-snug">
-          FDA label wording flags these pairs for extra review — not a full interaction database. Tap a
           row for a readable summary when available and the original label wording. Ask your clinician or
           pharmacist about your doses and conditions.
         </p>

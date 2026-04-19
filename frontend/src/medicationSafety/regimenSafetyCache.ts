@@ -8,7 +8,7 @@ import { getStoredEmail } from "../api/authStorage";
 import type { ActiveMedication } from "./types";
 import { fetchRegimenSafety, type RegimenSafetyResponse } from "./regimenSafetyClient";
 
-const STORAGE_KEY = "healthagent_regimen_safety_cache_v2";
+const STORAGE_KEY = 'healthagent_regimen_safety_cache_v2';
 
 /** In-flight regimen-safety fetches keyed by fingerprint (dedupes list + detail mounting together). */
 const pendingByFingerprint = new Map<string, Promise<RegimenSafetyResponse>>();

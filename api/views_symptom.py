@@ -45,7 +45,6 @@ INSURER_SLUGS = frozenset(
     }
 )
 
-
 class SymptomChatRequestSerializer(serializers.Serializer):
     session_id = serializers.UUIDField(required=False, allow_null=True)
     message = serializers.CharField(min_length=1, max_length=20000)

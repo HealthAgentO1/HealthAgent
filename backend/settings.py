@@ -248,7 +248,6 @@ OPENFDA_REQUEST_TIMEOUT = int(os.environ.get("OPENFDA_REQUEST_TIMEOUT", "25"))
 OPENFDA_CACHE_TTL_SECONDS = int(os.environ.get("OPENFDA_CACHE_TTL_SECONDS", str(86_400)))
 # Truncate long SPL sections in JSON responses (per section).
 OPENFDA_MAX_SECTION_CHARS = int(os.environ.get("OPENFDA_MAX_SECTION_CHARS", "6000"))
-
 # Plain-language interaction summaries (regimen-safety): in-process LRU + TTL by excerpt hash.
 INTERACTION_PLAIN_CACHE_TTL_SECONDS = int(
     os.environ.get("INTERACTION_PLAIN_CACHE_TTL_SECONDS", str(604_800)),

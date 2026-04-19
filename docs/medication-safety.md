@@ -80,7 +80,6 @@ Absence of a textual mention in section 7–style text does **not** prove safety
 - **Invalidation:** Fingerprint includes medication **identity** (client id, trimmed name, RxNorm, common/scientific names); changing only dosage/frequency/time/refill does **not** invalidate the openFDA payload.
 - **Scope:** Lowercased signed-in email must match the envelope; switching accounts avoids cross-user reuse.
 - **Deduping:** Concurrent requests for the same fingerprint share one in-flight `Promise`.
-
 ### Aggregate `safety_score.level`
 
 | Level | Meaning (automated) |
