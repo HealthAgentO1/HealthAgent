@@ -3,7 +3,12 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { isAxiosError } from "axios";
 import { getBroadcastEligibility } from "../api/broadcastEligibility";
 import { useAuth } from "../context/AuthContext";
-import { isValidEmailFormat, loginFormCanSubmit } from "../utils/authCredentialsValidation";
+import {
+  CREDENTIAL_LIMITS,
+  isValidEmailFormat,
+  loginFormCanSubmit,
+} from "../utils/authCredentialsValidation";
+import { flattenDrfError } from "../utils/drfValidationErrors";
 
 const LoginPage = () => {
   const { login } = useAuth();
@@ -27,9 +32,11 @@ const LoginPage = () => {
   const emailError =
     emailBlurred && !email.trim()
       ? "Enter your email."
-      : emailBlurred && !isValidEmailFormat(email)
-        ? "Enter a valid email address."
-        : null;
+      : emailBlurred && email.trim().length > CREDENTIAL_LIMITS.emailMax
+        ? `Email must be at most ${CREDENTIAL_LIMITS.emailMax} characters.`
+        : emailBlurred && !isValidEmailFormat(email)
+          ? "Enter a valid email address."
+          : null;
 
   const passwordError =
     passwordBlurred && password.length === 0 ? "Enter your password." : null;
@@ -38,12 +45,12 @@ const LoginPage = () => {
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setError(null);
     if (!loginFormCanSubmit(email, password)) {
       setEmailBlurred(true);
       setPasswordBlurred(true);
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
       await login(email.trim(), password);
@@ -59,14 +66,8 @@ const LoginPage = () => {
       navigate(redirectTo, { replace: true });
     } catch (err) {
       if (isAxiosError(err) && err.response?.data) {
-        const d = err.response.data as Record<string, unknown>;
-        if (typeof d.detail === "string") {
-          setError(d.detail);
-        } else if (typeof d.non_field_errors === "object") {
-          setError(String(d.non_field_errors));
-        } else {
-          setError("Could not sign in. Check email and password.");
-        }
+        const msg = flattenDrfError(err.response.data);
+        setError(msg ?? "Could not sign in. Verify your credentials and try again.");
       } else {
         setError("Network error. Is the API running?");
       }
@@ -117,6 +118,7 @@ const LoginPage = () => {
               type="text"
               inputMode="email"
               autoComplete="email"
+              maxLength={CREDENTIAL_LIMITS.emailMax}
               aria-invalid={Boolean(emailError)}
               value={email}
               onChange={(e) => setEmail(e.target.value)}

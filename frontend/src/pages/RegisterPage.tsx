@@ -2,7 +2,12 @@ import { useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { isAxiosError } from "axios";
-import { isValidEmailFormat, registerFormCanSubmit } from "../utils/authCredentialsValidation";
+import {
+  CREDENTIAL_LIMITS,
+  isValidEmailFormat,
+  registerFormCanSubmit,
+} from "../utils/authCredentialsValidation";
+import { flattenDrfError } from "../utils/drfValidationErrors";
 
 const RegisterPage = () => {
   const { register } = useAuth();
@@ -20,25 +25,39 @@ const RegisterPage = () => {
   const [passwordBlurred, setPasswordBlurred] = useState(false);
 
   const firstError =
-    firstBlurred && !firstName.trim() ? "Enter your first name." : null;
-  const lastError = lastBlurred && !lastName.trim() ? "Enter your last name." : null;
+    firstBlurred && !firstName.trim()
+      ? "Enter your first name."
+      : firstBlurred && firstName.trim().length > CREDENTIAL_LIMITS.firstNameMax
+        ? `First name must be at most ${CREDENTIAL_LIMITS.firstNameMax} characters.`
+        : null;
+  const lastError =
+    lastBlurred && !lastName.trim()
+      ? "Enter your last name."
+      : lastBlurred && lastName.trim().length > CREDENTIAL_LIMITS.lastNameMax
+        ? `Last name must be at most ${CREDENTIAL_LIMITS.lastNameMax} characters.`
+        : null;
 
   const emailError =
     emailBlurred && !email.trim()
       ? "Enter your email."
-      : emailBlurred && !isValidEmailFormat(email)
-        ? "Enter a valid email address."
-        : null;
+      : emailBlurred && email.trim().length > CREDENTIAL_LIMITS.emailMax
+        ? `Email must be at most ${CREDENTIAL_LIMITS.emailMax} characters.`
+        : emailBlurred && !isValidEmailFormat(email)
+          ? "Enter a valid email address."
+          : null;
 
   const passwordError =
-    passwordBlurred && password.length < 8
-      ? "Password must be at least 8 characters."
-      : null;
+    passwordBlurred && password.length < CREDENTIAL_LIMITS.passwordMin
+      ? `Password must be at least ${CREDENTIAL_LIMITS.passwordMin} characters.`
+      : passwordBlurred && password.length > CREDENTIAL_LIMITS.passwordMax
+        ? `Password must be at most ${CREDENTIAL_LIMITS.passwordMax} characters.`
+        : null;
 
   const canSubmit = registerFormCanSubmit(firstName, lastName, email, password);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
+    setError(null);
     if (!registerFormCanSubmit(firstName, lastName, email, password)) {
       setFirstBlurred(true);
       setLastBlurred(true);
@@ -46,7 +65,6 @@ const RegisterPage = () => {
       setPasswordBlurred(true);
       return;
     }
-    setError(null);
     setSubmitting(true);
     try {
       await register({
@@ -58,16 +76,10 @@ const RegisterPage = () => {
       navigate("/", { replace: true });
     } catch (err) {
       if (isAxiosError(err) && err.response?.data) {
-        const d = err.response.data as Record<string, unknown>;
-        if (typeof d.email === "object" && Array.isArray(d.email)) {
-          setError(d.email.join(" "));
-        } else if (typeof d.password === "object" && Array.isArray(d.password)) {
-          setError(d.password.join(" "));
-        } else if (typeof d.detail === "string") {
-          setError(d.detail);
-        } else {
-          setError("Could not create account. Try a different email.");
-        }
+        const msg = flattenDrfError(err.response.data);
+        setError(
+          msg ?? "Could not create account. Please review your details and try again.",
+        );
       } else {
         setError("Network error. Is the API running?");
       }
@@ -124,6 +136,7 @@ const RegisterPage = () => {
                 aria-invalid={Boolean(firstError)}
                 aria-required
                 value={firstName}
+                maxLength={CREDENTIAL_LIMITS.firstNameMax}
                 onChange={(e) => setFirstName(e.target.value)}
                 onBlur={() => setFirstBlurred(true)}
                 className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
@@ -151,6 +164,7 @@ const RegisterPage = () => {
                 aria-invalid={Boolean(lastError)}
                 aria-required
                 value={lastName}
+                maxLength={CREDENTIAL_LIMITS.lastNameMax}
                 onChange={(e) => setLastName(e.target.value)}
                 onBlur={() => setLastBlurred(true)}
                 className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
@@ -180,6 +194,7 @@ const RegisterPage = () => {
               aria-invalid={Boolean(emailError)}
               aria-required
               value={email}
+              maxLength={CREDENTIAL_LIMITS.emailMax}
               onChange={(e) => setEmail(e.target.value)}
               onBlur={() => setEmailBlurred(true)}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
@@ -207,12 +222,13 @@ const RegisterPage = () => {
               aria-invalid={Boolean(passwordError)}
               aria-required
               value={password}
+              maxLength={CREDENTIAL_LIMITS.passwordMax}
               onChange={(e) => setPassword(e.target.value)}
               onBlur={() => setPasswordBlurred(true)}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2.5 text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
             />
             <p className="text-xs text-on-surface-variant mt-1">
-              At least 8 characters
+              {CREDENTIAL_LIMITS.passwordMin}–{CREDENTIAL_LIMITS.passwordMax} characters
             </p>
             {passwordError ? (
               <p className="mt-1 text-xs text-error font-body" role="alert">

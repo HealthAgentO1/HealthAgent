@@ -1,12 +1,21 @@
 /**
  * Client-side checks for login / register forms (inline UI). The API remains authoritative.
+ * Keep max lengths in sync with `users/constants.py`.
  */
+
+export const CREDENTIAL_LIMITS = {
+  emailMax: 128,
+  passwordMax: 64,
+  passwordMin: 8,
+  firstNameMax: 40,
+  lastNameMax: 40,
+} as const;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function isValidEmailFormat(value: string): boolean {
   const v = value.trim();
-  if (!v) return false;
+  if (!v || v.length > CREDENTIAL_LIMITS.emailMax) return false;
   return EMAIL_RE.test(v);
 }
 
@@ -20,10 +29,17 @@ export function registerFormCanSubmit(
   email: string,
   password: string,
 ): boolean {
+  const f = firstName.trim();
+  const l = lastName.trim();
+  const e = email.trim();
   return (
-    firstName.trim().length > 0 &&
-    lastName.trim().length > 0 &&
+    f.length > 0 &&
+    f.length <= CREDENTIAL_LIMITS.firstNameMax &&
+    l.length > 0 &&
+    l.length <= CREDENTIAL_LIMITS.lastNameMax &&
     isValidEmailFormat(email) &&
-    password.length >= 8
+    e.length <= CREDENTIAL_LIMITS.emailMax &&
+    password.length >= CREDENTIAL_LIMITS.passwordMin &&
+    password.length <= CREDENTIAL_LIMITS.passwordMax
   );
 }

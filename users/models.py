@@ -1,5 +1,8 @@
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
+from django.utils.translation import gettext_lazy as _
+
+from .constants import MAX_EMAIL_LENGTH, MAX_FIRST_NAME_LENGTH, MAX_LAST_NAME_LENGTH
 
 
 class UserManager(BaseUserManager):
@@ -24,7 +27,9 @@ class UserManager(BaseUserManager):
 
 class User(AbstractUser):
     username = None
-    email = models.EmailField("email address", unique=True)
+    first_name = models.CharField(_("first name"), max_length=MAX_FIRST_NAME_LENGTH, blank=True)
+    last_name = models.CharField(_("last name"), max_length=MAX_LAST_NAME_LENGTH, blank=True)
+    email = models.EmailField(_("email address"), max_length=MAX_EMAIL_LENGTH, unique=True)
     date_of_birth = models.DateField(null=True, blank=True)
     # Symptom Check / settings: optional US practice address (same shape as client `UserAddress`).
     default_address = models.JSONField(null=True, blank=True)

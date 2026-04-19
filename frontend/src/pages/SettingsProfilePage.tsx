@@ -14,6 +14,8 @@ import {
   UserAddressFormFields,
   type AddressFieldKey,
 } from "../symptomCheck/UserAddressFormFields";
+import { CREDENTIAL_LIMITS } from "../utils/authCredentialsValidation";
+import { flattenDrfError } from "../utils/drfValidationErrors";
 
 function displayInitial(first: string, last: string, email: string | null): string {
   const f = first.trim();
@@ -101,14 +103,8 @@ const SettingsProfilePage: React.FC = () => {
       window.setTimeout(() => setSavedHint(false), 4000);
     } catch (err) {
       if (isAxiosError(err) && err.response?.data) {
-        const d = err.response.data as Record<string, unknown>;
-        if (typeof d.detail === "string") {
-          setSaveError(d.detail);
-        } else if (typeof d.date_of_birth === "object" && Array.isArray(d.date_of_birth)) {
-          setSaveError(d.date_of_birth.join(" "));
-        } else {
-          setSaveError("Could not save. Check your input and try again.");
-        }
+        const msg = flattenDrfError(err.response.data);
+        setSaveError(msg ?? "Could not save. Check your input and try again.");
       } else {
         setSaveError("Network error. Is the API running?");
       }
@@ -150,12 +146,8 @@ const SettingsProfilePage: React.FC = () => {
       window.setTimeout(() => setAddressSavedHint(false), 4000);
     } catch (err) {
       if (isAxiosError(err) && err.response?.data) {
-        const d = err.response.data as Record<string, unknown>;
-        if (typeof d.detail === "string") {
-          setAddressSaveError(d.detail);
-        } else {
-          setAddressSaveError("Could not save address. Check your input and try again.");
-        }
+        const msg = flattenDrfError(err.response.data);
+        setAddressSaveError(msg ?? "Could not save address. Check your input and try again.");
       } else {
         setAddressSaveError("Network error. Is the API running?");
       }
@@ -235,7 +227,7 @@ const SettingsProfilePage: React.FC = () => {
                         className="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
                         value={firstName}
                         onChange={(e) => setFirstName(e.target.value)}
-                        maxLength={150}
+                        maxLength={CREDENTIAL_LIMITS.firstNameMax}
                       />
                     </div>
                     <div>
@@ -248,7 +240,7 @@ const SettingsProfilePage: React.FC = () => {
                         className="w-full rounded-lg border border-outline-variant bg-surface px-3 py-2 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary-container"
                         value={lastName}
                         onChange={(e) => setLastName(e.target.value)}
-                        maxLength={150}
+                        maxLength={CREDENTIAL_LIMITS.lastNameMax}
                       />
                     </div>
                   </div>

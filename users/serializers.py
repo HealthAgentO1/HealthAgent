@@ -1,9 +1,18 @@
 import re
 
 from django.contrib.auth import get_user_model
+from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.validators import UniqueValidator
 
+from .constants import (
+    MAX_EMAIL_LENGTH,
+    MAX_FIRST_NAME_LENGTH,
+    MAX_LAST_NAME_LENGTH,
+    MAX_PASSWORD_LENGTH,
+    MIN_PASSWORD_LENGTH,
+)
 from .us_states import US_STATE_CODES
 
 User = get_user_model()
@@ -97,8 +106,16 @@ class UserProfileSerializer(serializers.ModelSerializer):
             "default_insurance_slug",
         )
         extra_kwargs = {
-            "first_name": {"required": False, "allow_blank": True},
-            "last_name": {"required": False, "allow_blank": True},
+            "first_name": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": MAX_FIRST_NAME_LENGTH,
+            },
+            "last_name": {
+                "required": False,
+                "allow_blank": True,
+                "max_length": MAX_LAST_NAME_LENGTH,
+            },
             "date_of_birth": {"required": False, "allow_null": True},
         }
 
@@ -123,17 +140,44 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class RegisterSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True, min_length=8, style={"input_type": "password"})
+    email = serializers.EmailField(
+        max_length=MAX_EMAIL_LENGTH,
+        validators=[
+            UniqueValidator(
+                queryset=User.objects.all(),
+                message="A user with that email already exists.",
+            )
+        ],
+    )
+    password = serializers.CharField(
+        write_only=True,
+        min_length=MIN_PASSWORD_LENGTH,
+        max_length=MAX_PASSWORD_LENGTH,
+        style={"input_type": "password"},
+    )
+    first_name = serializers.CharField(
+        max_length=MAX_FIRST_NAME_LENGTH,
+        required=False,
+        allow_blank=True,
+    )
+    last_name = serializers.CharField(
+        max_length=MAX_LAST_NAME_LENGTH,
+        required=False,
+        allow_blank=True,
+    )
 
     class Meta:
         model = User
         fields = ("id", "email", "password", "first_name", "last_name")
         read_only_fields = ("id",)
-        extra_kwargs = {
-            "first_name": {"required": False, "allow_blank": True},
-            "last_name": {"required": False, "allow_blank": True},
-        }
 
     def create(self, validated_data):
         password = validated_data.pop("password")
-        return User.objects.create_user(password=password, **validated_data)
+        try:
+            return User.objects.create_user(password=password, **validated_data)
+        except IntegrityError as exc:
+            # Guard against race conditions where duplicate email slips in between
+            # validator check and INSERT.
+            raise serializers.ValidationError(
+                {"email": ["A user with that email already exists."]}
+            ) from exc

@@ -2,6 +2,13 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from users.constants import (
+    MAX_EMAIL_LENGTH,
+    MAX_FIRST_NAME_LENGTH,
+    MAX_LAST_NAME_LENGTH,
+    MAX_PASSWORD_LENGTH,
+)
+
 User = get_user_model()
 
 
@@ -145,6 +152,69 @@ class AuthApiTests(APITestCase):
         self.assertNotIn("password", response.data)
         self.assertTrue(User.objects.filter(email="new@example.com").exists())
 
+    def test_register_rejects_password_over_max_length(self):
+        email = "longpw@example.com"
+        body = {
+            "email": email,
+            "password": "a" * (MAX_PASSWORD_LENGTH + 1),
+            "first_name": "A",
+            "last_name": "B",
+        }
+        res = self.client.post(self.register_url, body, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_rejects_email_over_max_length(self):
+        # local part + "@example.com" (12 chars) must exceed MAX_EMAIL_LENGTH
+        email = "a" * (MAX_EMAIL_LENGTH - 11) + "@example.com"
+        self.assertGreater(len(email), MAX_EMAIL_LENGTH)
+        res = self.client.post(
+            self.register_url,
+            {"email": email, "password": "12345678ab", "first_name": "A", "last_name": "B"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_rejects_first_name_over_max_length(self):
+        res = self.client.post(
+            self.register_url,
+            {
+                "email": "longfirst@example.com",
+                "password": "12345678ab",
+                "first_name": "x" * (MAX_FIRST_NAME_LENGTH + 1),
+                "last_name": "B",
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_register_rejects_last_name_over_max_length(self):
+        res = self.client.post(
+            self.register_url,
+            {
+                "email": "longlast@example.com",
+                "password": "12345678ab",
+                "first_name": "A",
+                "last_name": "z" * (MAX_LAST_NAME_LENGTH + 1),
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_me_rejects_first_name_over_max_length(self):
+        User.objects.create_user(email="toolong@example.com", password="pass12345")
+        access = self.client.post(
+            self.token_url,
+            {"email": "toolong@example.com", "password": "pass12345"},
+            format="json",
+        ).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {access}")
+        res = self.client.patch(
+            self.me_url,
+            {"first_name": "y" * (MAX_FIRST_NAME_LENGTH + 1)},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
     def test_register_rejects_duplicate_email(self):
         User.objects.create_user(email="dup@example.com", password="somepass123")
         response = self.client.post(
@@ -153,6 +223,7 @@ class AuthApiTests(APITestCase):
             format="json",
         )
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("email", response.data)
 
     def test_login_returns_access_and_refresh(self):
         User.objects.create_user(email="login@example.com", password="goodpass99")
