@@ -1,0 +1,97 @@
+from unittest.mock import patch
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase, override_settings
+from rest_framework import status
+from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
+
+from api.models import MedicationProfile
+from api.services.medication_llm_service import MedicationLlmError
+from api.services.medication_extraction import extract_medications_with_rxnorm
+from api.views_medication import MedicationProfileExtractView
+
+User = get_user_model()
+
+
+@override_settings(OPENAI_API_KEY="test-key", OPENAI_BASE_URL="https://api.deepseek.com")
+class MedicationExtractionServiceTests(TestCase):
+    @patch("api.services.medication_extraction.resolve_rxnorm_id_for_drug_name")
+    @patch("api.services.medication_extraction.extract_medication_names_via_llm")
+    def test_extract_uses_deepseek_rxnorm_when_present(self, mock_llm, mock_rxnav):
+        mock_llm.return_value = [
+            {"name": "lisinopril", "rxnorm_id": "29046"},
+        ]
+        out = extract_medications_with_rxnorm("lisinopril 10mg daily")
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["name"], "lisinopril")
+        self.assertEqual(out[0]["rxnorm_id"], "29046")
+        self.assertEqual(out[0]["rxnorm_source"], "deepseek")
+        mock_rxnav.assert_not_called()
+
+    @patch("api.services.medication_extraction.resolve_rxnorm_id_for_drug_name")
+    @patch("api.services.medication_extraction.extract_medication_names_via_llm")
+    def test_extract_falls_back_to_rxnav(self, mock_llm, mock_rxnav):
+        mock_llm.return_value = [
+            {"name": "metformin", "rxnorm_id": None},
+        ]
+        mock_rxnav.return_value = "6809"
+        out = extract_medications_with_rxnorm("metformin")
+        self.assertEqual(out[0]["rxnorm_id"], "6809")
+        self.assertEqual(out[0]["rxnorm_source"], "rxnav")
+        mock_rxnav.assert_called_once_with("metformin")
+
+
+@override_settings(DEBUG=False, OPENAI_API_KEY="test-key")
+class MedicationProfileExtractApiTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="meds@example.com",
+            password="testpass123",
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    @patch("api.views_medication.extract_medications_with_rxnorm")
+    def test_post_creates_profile(self, mock_extract):
+        mock_extract.return_value = [
+            {"name": "aspirin", "rxnorm_id": "1191", "rxnorm_source": "deepseek"},
+        ]
+        res = self.client.post(
+            "/api/medication-profile/extract/",
+            {"medications_text": "baby aspirin"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["medications_raw"], "baby aspirin")
+        self.assertEqual(len(res.data["extracted_medications"]), 1)
+        self.assertEqual(MedicationProfile.objects.filter(user=self.user).count(), 1)
+
+    def test_post_requires_llm_key(self):
+        factory = APIRequestFactory()
+        request = factory.post(
+            "/api/medication-profile/extract/",
+            {"medications_text": "aspirin"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        with override_settings(OPENAI_API_KEY=""):
+            response = MedicationProfileExtractView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    def test_post_requires_body_text(self):
+        res = self.client.post("/api/medication-profile/extract/", {}, format="json")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @patch("api.views_medication.extract_medications_with_rxnorm")
+    def test_post_llm_error_502(self, mock_extract):
+        mock_extract.side_effect = MedicationLlmError("upstream failure")
+        factory = APIRequestFactory()
+        request = factory.post(
+            "/api/medication-profile/extract/",
+            {"text": "x"},
+            format="json",
+        )
+        force_authenticate(request, user=self.user)
+        response = MedicationProfileExtractView.as_view()(request)
+        self.assertEqual(response.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertEqual(MedicationProfile.objects.count(), 0)

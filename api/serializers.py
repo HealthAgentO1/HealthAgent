@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from .models import ExampleItem, SymptomSession
+from .models import ExampleItem, MedicationProfile, SymptomSession
 from .services.session_resume import build_session_resume_payload
 
 
@@ -76,3 +76,12 @@ class SymptomSessionResumeSerializer(serializers.BaseSerializer):
 
     def to_representation(self, instance: SymptomSession):
         return build_session_resume_payload(instance)
+
+
+class MedicationProfileExtractResponseSerializer(serializers.ModelSerializer):
+    """Response for LLM (DeepSeek/OpenAI-compatible) medication extraction + save."""
+
+    class Meta:
+        model = MedicationProfile
+        fields = ["id", "medications_raw", "extracted_medications", "created_at"]
+        read_only_fields = ["id", "medications_raw", "extracted_medications", "created_at"]
