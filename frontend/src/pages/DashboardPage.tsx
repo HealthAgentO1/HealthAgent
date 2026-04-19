@@ -6,6 +6,7 @@ import {
   useSymptomSessions,
   type SymptomSessionListItem,
 } from "../api/queries";
+import { useAuth } from "../context/AuthContext";
 import { loadActiveRegimen } from "../medicationSafety/medicationRegimenStorage";
 import { MedicationNameHeading } from "../medicationSafety/MedicationNameHeading";
 
@@ -34,6 +35,7 @@ function pickLatestSession(list: SymptomSessionListItem[]): SymptomSessionListIt
 }
 
 const DashboardPage: React.FC = () => {
+  const { email } = useAuth();
   const { data: sessions, isLoading, isError, error } = useSymptomSessions();
   const deleteSession = useDeleteSymptomSession();
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
@@ -47,7 +49,7 @@ const DashboardPage: React.FC = () => {
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, []);
+  }, [email]);
 
   const latestSession = useMemo(
     () => (!sessions?.length ? null : pickLatestSession(sessions)),

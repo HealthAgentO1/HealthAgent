@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import { displayOrDash } from "../medicationSafety/display";
 import type { RegimenSafetyResponse } from "../medicationSafety/regimenSafetyClient";
 import {
@@ -169,9 +170,11 @@ function EditRegimenModal({ med, open, onClose, onSaved }: EditModalProps) {
  * Single medication: safety info below the title, edit/remove actions, regimen edits in a modal.
  */
 const MedicationSafetyDetailPage: React.FC = () => {
+  const { email } = useAuth();
   const { medicationId } = useParams<{ medicationId: string }>();
   const navigate = useNavigate();
   const [, setDataRefresh] = useState(0);
+  /** Re-read from per-account storage each render (`bump` after edits; `email` from context on account switch). */
   const med = medicationId ? getMedicationById(medicationId) : undefined;
 
   const [editOpen, setEditOpen] = useState(false);
@@ -219,7 +222,7 @@ const MedicationSafetyDetailPage: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [medicationId]);
+  }, [medicationId, email]);
 
   const bump = () => setDataRefresh((x) => x + 1);
 

@@ -1,17 +1,25 @@
 /**
  * Session-scoped cache for openFDA regimen safety responses.
  * Invalidates when the regimen **identity** changes (add/remove/rename/RxNorm/common/scientific),
- * not when optional fields like dosage change.
+ * not when optional fields like dosage change. Scoped to the signed-in account so switching
+ * users in the same tab does not reuse another account’s cache.
  */
+import { getStoredEmail } from "../api/authStorage";
 import type { ActiveMedication } from "./types";
 import { fetchRegimenSafety, type RegimenSafetyResponse } from "./regimenSafetyClient";
 
 const STORAGE_KEY = "healthagent_regimen_safety_cache_v1";
 
 type CacheEnvelope = {
+  /** Lowercased email; must match current session for a hit. */
+  accountEmail: string;
   fingerprint: string;
   data: RegimenSafetyResponse;
 };
+
+function currentAccountKey(): string {
+  return getStoredEmail()?.trim().toLowerCase() ?? "";
+}
 
 /** Stable identity for which medications are in the regimen (order-independent). */
 export function regimenIdentityFingerprint(regimen: ActiveMedication[]): string {
@@ -29,12 +37,16 @@ export function regimenIdentityFingerprint(regimen: ActiveMedication[]): string 
 
 export function readCachedRegimenSafety(fingerprint: string): RegimenSafetyResponse | null {
   try {
+    const account = currentAccountKey();
+    if (!account) {
+      return null;
+    }
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) {
       return null;
     }
     const parsed = JSON.parse(raw) as CacheEnvelope;
-    if (parsed.fingerprint !== fingerprint) {
+    if (parsed.accountEmail !== account || parsed.fingerprint !== fingerprint) {
       return null;
     }
     return parsed.data;
@@ -45,7 +57,11 @@ export function readCachedRegimenSafety(fingerprint: string): RegimenSafetyRespo
 
 export function writeCachedRegimenSafety(fingerprint: string, data: RegimenSafetyResponse): void {
   try {
-    const env: CacheEnvelope = { fingerprint, data };
+    const account = currentAccountKey();
+    if (!account) {
+      return;
+    }
+    const env: CacheEnvelope = { accountEmail: account, fingerprint, data };
     sessionStorage.setItem(STORAGE_KEY, JSON.stringify(env));
   } catch {
     // Quota or private mode — ignore; network path still works.

@@ -1,5 +1,5 @@
 /**
- * Active regimen entries are stored in the browser (see medicationRegimenStorage.ts).
+ * Active regimen entries are stored in the browser per signed-in account (see medicationRegimenStorage.ts).
  * Optional fields render as "-" on the list and detail views when empty.
  */
 export type ActiveMedication = {
