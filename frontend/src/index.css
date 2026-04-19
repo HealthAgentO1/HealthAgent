@@ -167,3 +167,22 @@ input[type="range"]::-webkit-slider-runnable-track {
 input[type="range"]:focus::-webkit-slider-runnable-track {
   background: #d7dadf;
 }
+
+/* One-time first-visit overlay (FirstVisitJumpscare) */
+@keyframes o1-jumpscare-pop {
+  0% {
+    transform: scale(0.15);
+    filter: brightness(3.5);
+  }
+  18% {
+    transform: scale(1.08);
+    filter: brightness(1.6);
+  }
+  100% {
+    transform: scale(1);
+    filter: brightness(1);
+  }
+}
+.o1-jumpscare-overlay {
+  animation: o1-jumpscare-pop 0.32s ease-out both;
+}
