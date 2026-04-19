@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from .models import SymptomSession
 from .services.nppes_nearby import find_nearby_facilities
+from .services.report_service import build_pre_visit_report
 from .services.survey_session_persist import (
     append_survey_turn,
     apply_condition_assessment_summary,
@@ -126,7 +127,9 @@ class SymptomSurveyLlmSerializer(serializers.Serializer):
     `frontend/src/symptomCheck/prompts/*.txt` plus JSON user_payload for the model.
     """
 
-    phase = serializers.ChoiceField(choices=["followup_questions", "condition_assessment"])
+    phase = serializers.ChoiceField(
+        choices=["followup_questions", "followup_questions_round_2", "condition_assessment"]
+    )
     system_prompt = serializers.CharField(min_length=1, max_length=200_000)
     user_payload = serializers.JSONField()
     session_id = serializers.UUIDField(required=False, allow_null=True)
@@ -202,13 +205,22 @@ class SymptomChatView(APIView):
         }
         session.ai_conversation_log = log + [assistant_entry]
         session.triage_level = parsed["triage_level"]
-        session.save(
-            update_fields=[
-                "ai_conversation_log",
-                "triage_level",
-                "updated_at",
-            ]
-        )
+
+        update_fields = [
+            "ai_conversation_log",
+            "triage_level",
+            "updated_at",
+        ]
+        if parsed["interview_complete"]:
+            try:
+                report = build_pre_visit_report(session)
+                if report:
+                    session.pre_visit_report = report
+                    update_fields.insert(2, "pre_visit_report")
+            except Exception as e:
+                logger.exception("Failed to generate pre-visit report for session %s: %s", session.pk, e)
+
+        session.save(update_fields=update_fields)
 
         turn_index = sum(
             1 for e in session.ai_conversation_log if e.get("role") == "assistant"
@@ -278,6 +290,16 @@ class SymptomSurveyLlmView(APIView):
             apply_condition_assessment_summary(
                 session, raw_text=raw_text, user_payload=user_payload
             )
+            try:
+                report = build_pre_visit_report(session)
+                if report:
+                    session.pre_visit_report = report
+            except Exception as e:
+                logger.exception(
+                    "Failed to generate pre-visit report for session %s: %s",
+                    session.pk,
+                    e,
+                )
         session.save()
 
         return Response(

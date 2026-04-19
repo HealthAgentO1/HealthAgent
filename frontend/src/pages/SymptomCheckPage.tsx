@@ -23,6 +23,7 @@ import { US_STATE_OPTIONS, type UsStateCode } from "../symptomCheck/usStates";
 import {
   requestConditionAssessment,
   requestFollowUpQuestions,
+  requestSecondFollowUpQuestions,
   type StructuredFollowUpAnswer,
 } from "../symptomCheck/symptomLlmClient";
 import type { FollowUpQuestionsWithSession } from "../symptomCheck/types";
@@ -36,11 +37,10 @@ import {
   isRecoverableSymptomCheckSession,
   readSymptomCheckSession,
   writeSymptomCheckSession,
+  type SymptomCheckFlowStep,
   type SymptomCheckPendingRequest,
   type SymptomCheckSessionSnapshot,
 } from "../symptomCheck/symptomCheckSession";
-
-type FlowStep = "intake" | "followup" | "results";
 
 const INSURANCE_OPTIONS = [
   { id: "united", label: "United Healthcare" },
@@ -98,6 +98,18 @@ function insuranceIdFromLabel(label: string): InsuranceId | "" {
   return "";
 }
 
+function buildStructuredAnswers(
+  questions: FollowUpQuestion[],
+  answers: Record<string, FollowUpAnswer>,
+): StructuredFollowUpAnswer[] {
+  return questions.map((q) => ({
+    question_id: q.id,
+    question_prompt: q.prompt,
+    input_type: q.input_type,
+    value: answers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
+  }));
+}
+
 /** Default control values so required validation and sliders start in a defined state. */
 function buildInitialAnswers(questions: FollowUpQuestion[]): Record<string, FollowUpAnswer> {
   const out: Record<string, FollowUpAnswer> = {};
@@ -151,7 +163,7 @@ function severityStyles(level: string): string {
 const SymptomCheckPage: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [step, setStep] = useState<FlowStep>("intake");
+  const [step, setStep] = useState<SymptomCheckFlowStep>("intake");
   const [symptoms, setSymptoms] = useState("");
   const [insurance, setInsurance] = useState<InsuranceId | "">("");
   /** Step 1: practice location for NPPES distance ranking (mirrored to `symptomCheckSession`). */
@@ -166,6 +178,8 @@ const SymptomCheckPage: React.FC = () => {
   // Step 2: populated after the first LLM call; keys match `FollowUpQuestion.id`.
   const [followUpQuestions, setFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
+  const [secondFollowUpQuestions, setSecondFollowUpQuestions] = useState<FollowUpQuestion[]>([]);
+  const [secondFollowUpAnswers, setSecondFollowUpAnswers] = useState<Record<string, FollowUpAnswer>>({});
   const [results, setResults] = useState<SymptomResultsPayload | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
   /** Step 3: NPPES-backed facilities (relevance + distance on the server). */
@@ -200,6 +214,7 @@ const SymptomCheckPage: React.FC = () => {
   const resultsLoading = resultsMutation.isPending;
   const followUpProgress = useSimulatedProgress(followUpLoading);
   const resultsProgress = useSimulatedProgress(resultsLoading);
+  const roundTwoRequestProgress = useSimulatedProgress(pendingRequest === "followup_round_2");
 
   /**
    * `need-choice`: show Resume / Start over until the user picks one (see lazy init below).
@@ -245,6 +260,8 @@ const SymptomCheckPage: React.FC = () => {
             const { questions } = validateFollowUpQuestionsPayload(parsed);
             setFollowUpQuestions(questions);
             setFollowUpAnswers(buildInitialAnswers(questions));
+            setSecondFollowUpQuestions([]);
+            setSecondFollowUpAnswers({});
             setResults(null);
             setStep("followup");
           } catch {
@@ -310,6 +327,10 @@ const SymptomCheckPage: React.FC = () => {
 
   const followUpValid = followUpAnswersSatisfy(followUpQuestions, followUpAnswers);
 
+  const secondFollowUpValid =
+    secondFollowUpQuestions.length === 0 ||
+    followUpAnswersSatisfy(secondFollowUpQuestions, secondFollowUpAnswers);
+
   const insurerLabel = useMemo(
     () => (insurance ? insuranceLabel(insurance) : ""),
     [insurance],
@@ -327,6 +348,8 @@ const SymptomCheckPage: React.FC = () => {
       setSurveyBackendSessionId(data.session_id);
       setFollowUpQuestions(data.questions);
       setFollowUpAnswers(buildInitialAnswers(data.questions));
+      setSecondFollowUpQuestions([]);
+      setSecondFollowUpAnswers({});
       setResults(null);
       setStep("followup");
     } catch (err) {
@@ -336,15 +359,23 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
-  /** Second LLM call (follow-up → results). Accepts explicit `questions` / `answers` for resume. */
+  /** Final LLM call (follow-up round(s) → results). Supports one or two question rounds. */
   const runResultsRequest = async (input: {
     symptoms: string;
     insuranceLabel: string;
-    questions: FollowUpQuestion[];
-    answers: Record<string, FollowUpAnswer>;
+    questionsRound1: FollowUpQuestion[];
+    answersRound1: Record<string, FollowUpAnswer>;
+    questionsRound2?: FollowUpQuestion[];
+    answersRound2?: Record<string, FollowUpAnswer>;
     backendSessionId: string | null;
   }) => {
-    if (!followUpAnswersSatisfy(input.questions, input.answers)) {
+    const q2 = input.questionsRound2 ?? [];
+    const a2 = input.answersRound2 ?? {};
+    if (!followUpAnswersSatisfy(input.questionsRound1, input.answersRound1)) {
+      setLlmError("Saved answers are incomplete. Please review the questionnaire.");
+      return;
+    }
+    if (q2.length > 0 && !followUpAnswersSatisfy(q2, a2)) {
       setLlmError("Saved answers are incomplete. Please review the questionnaire.");
       return;
     }
@@ -359,12 +390,10 @@ const SymptomCheckPage: React.FC = () => {
     setLlmError(null);
     setPendingRequest("results");
     try {
-      const structured = input.questions.map((q) => ({
-        question_id: q.id,
-        question_prompt: q.prompt,
-        input_type: q.input_type,
-        value: input.answers[q.id] ?? (q.input_type === "multi_choice" ? [] : ""),
-      }));
+      const structured = [
+        ...buildStructuredAnswers(input.questionsRound1, input.answersRound1),
+        ...buildStructuredAnswers(q2, a2),
+      ];
 
       const payload = await resultsMutation.mutateAsync({
         symptoms: input.symptoms,
@@ -382,6 +411,46 @@ const SymptomCheckPage: React.FC = () => {
     }
   };
 
+  /** After round 1: either a second question round or jump straight to condition assessment. */
+  const handleCheckAndProceed = async () => {
+    if (!followUpValid || pendingRequest) return;
+    if (!surveyBackendSessionId) {
+      setLlmError(
+        "This session is missing server data. Please start a new symptom check from the beginning.",
+      );
+      return;
+    }
+    setLlmError(null);
+    setPendingRequest("followup_round_2");
+    try {
+      const structured = buildStructuredAnswers(followUpQuestions, followUpAnswers);
+      const data = await requestSecondFollowUpQuestions({
+        symptoms: symptoms.trim(),
+        insuranceLabel: insurerLabel,
+        firstRoundAnswers: structured,
+        sessionId: surveyBackendSessionId,
+      });
+
+      if (data.questions.length === 0) {
+        await runResultsRequest({
+          symptoms: symptoms.trim(),
+          insuranceLabel: insurerLabel,
+          questionsRound1: followUpQuestions,
+          answersRound1: followUpAnswers,
+          backendSessionId: surveyBackendSessionId,
+        });
+      } else {
+        setSecondFollowUpQuestions(data.questions);
+        setSecondFollowUpAnswers(buildInitialAnswers(data.questions));
+        setStep("followup_round_2");
+      }
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Unable to evaluate. Please try again.");
+    } finally {
+      setPendingRequest(null);
+    }
+  };
+
   /** Step 1 → 2: first LLM request; on success we render dynamic questions. */
   const handleContinueToFollowUp = async () => {
     if (!intakeValid || pendingRequest) return;
@@ -391,14 +460,16 @@ const SymptomCheckPage: React.FC = () => {
     });
   };
 
-  /** Step 2 → 3: second LLM request includes prompts + values for traceability in `user_payload`. */
+  /** Round 2 (if any) → condition assessment. */
   const handleSeeResults = async () => {
-    if (!followUpValid || pendingRequest) return;
+    if (!followUpValid || !secondFollowUpValid || pendingRequest) return;
     await runResultsRequest({
       symptoms: symptoms.trim(),
       insuranceLabel: insurerLabel,
-      questions: followUpQuestions,
-      answers: followUpAnswers,
+      questionsRound1: followUpQuestions,
+      answersRound1: followUpAnswers,
+      questionsRound2: secondFollowUpQuestions,
+      answersRound2: secondFollowUpAnswers,
       backendSessionId: surveyBackendSessionId,
     });
   };
@@ -427,6 +498,8 @@ const SymptomCheckPage: React.FC = () => {
       },
       followUpQuestions,
       followUpAnswers,
+      secondFollowUpQuestions,
+      secondFollowUpAnswers,
       results,
       pendingRequest,
       llmError,
@@ -441,6 +514,8 @@ const SymptomCheckPage: React.FC = () => {
     userAddress,
     followUpQuestions,
     followUpAnswers,
+    secondFollowUpQuestions,
+    secondFollowUpAnswers,
     results,
     pendingRequest,
     llmError,
@@ -523,6 +598,8 @@ const SymptomCheckPage: React.FC = () => {
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions(snap.followUpQuestions);
     setFollowUpAnswers(snap.followUpAnswers);
+    setSecondFollowUpQuestions(snap.secondFollowUpQuestions);
+    setSecondFollowUpAnswers(snap.secondFollowUpAnswers);
     setResults(snap.results);
     setLlmError(snap.llmError);
     setSurveyBackendSessionId(snap.surveyBackendSessionId);
@@ -546,14 +623,21 @@ const SymptomCheckPage: React.FC = () => {
     if (snap.pendingRequest === "followup") {
       if (trimmed.length === 0 || !ins) return;
       void runFollowUpRequest({ symptoms: trimmed, insuranceLabel: label });
+    } else if (snap.pendingRequest === "followup_round_2") {
+      if (trimmed.length === 0 || !ins) return;
+      if (snap.followUpQuestions.length === 0) return;
+      if (!snap.surveyBackendSessionId) return;
+      void handleCheckAndProceed();
     } else if (snap.pendingRequest === "results") {
       if (trimmed.length === 0 || !ins) return;
       if (snap.followUpQuestions.length === 0) return;
       void runResultsRequest({
         symptoms: trimmed,
         insuranceLabel: label,
-        questions: snap.followUpQuestions,
-        answers: snap.followUpAnswers,
+        questionsRound1: snap.followUpQuestions,
+        answersRound1: snap.followUpAnswers,
+        questionsRound2: snap.secondFollowUpQuestions,
+        answersRound2: snap.secondFollowUpAnswers,
         backendSessionId: snap.surveyBackendSessionId,
       });
     }
@@ -568,6 +652,8 @@ const SymptomCheckPage: React.FC = () => {
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
+    setSecondFollowUpQuestions([]);
+    setSecondFollowUpAnswers({});
     setResults(null);
     setLlmError(null);
     setPendingRequest(null);
@@ -587,6 +673,8 @@ const SymptomCheckPage: React.FC = () => {
     setAddressFieldBlurred(INITIAL_ADDRESS_BLURRED);
     setFollowUpQuestions([]);
     setFollowUpAnswers({});
+    setSecondFollowUpQuestions([]);
+    setSecondFollowUpAnswers({});
     setResults(null);
     setLlmError(null);
     setPendingRequest(null);
@@ -605,7 +693,8 @@ const SymptomCheckPage: React.FC = () => {
     return () => clearTimeout(t);
   }, [results]);
 
-  const stepIndex = step === "intake" ? 1 : step === "followup" ? 2 : 3;
+  const stepIndex =
+    step === "intake" ? 1 : step === "followup" || step === "followup_round_2" ? 2 : 3;
 
   const updateAnswer = (questionId: string, value: FollowUpAnswer) => {
     setFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
@@ -633,6 +722,30 @@ const SymptomCheckPage: React.FC = () => {
     }
 
     updateAnswer(question.id, next);
+  };
+
+  const updateSecondRoundAnswer = (questionId: string, value: FollowUpAnswer) => {
+    setSecondFollowUpAnswers((prev) => ({ ...prev, [questionId]: value }));
+  };
+
+  const toggleSecondRoundMultiChoice = (question: FollowUpQuestion, optionId: string) => {
+    const current = secondFollowUpAnswers[question.id];
+    const selected = Array.isArray(current) ? [...current] : [];
+    const isNone = optionId === "none";
+
+    let next: string[];
+    if (isNone) {
+      next = selected.includes("none") ? [] : ["none"];
+    } else {
+      const withoutNone = selected.filter((id) => id !== "none");
+      if (withoutNone.includes(optionId)) {
+        next = withoutNone.filter((id) => id !== optionId);
+      } else {
+        next = [...withoutNone, optionId];
+      }
+    }
+
+    updateSecondRoundAnswer(question.id, next);
   };
 
   /** Maps each `input_type` from the LLM to the same control patterns as the old static step. */
@@ -801,6 +914,175 @@ const SymptomCheckPage: React.FC = () => {
 
     return null;
   };
+
+  /** Second-round questions (same controls as round 1; separate state). */
+  const renderSecondRoundQuestion = (q: FollowUpQuestion) => {
+    const value = secondFollowUpAnswers[q.id];
+
+    if (q.input_type === "single_choice" && q.options) {
+      return (
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
+          <legend className="text-sm font-semibold text-on-surface mb-3 block">
+            {q.prompt}
+            {q.required ? (
+              <span className="text-error ml-1" aria-hidden>
+                *
+              </span>
+            ) : null}
+          </legend>
+          {q.helper_text ? (
+            <p className="text-xs text-on-surface-variant font-body mb-3">{q.helper_text}</p>
+          ) : null}
+          <div className="flex flex-col gap-2">
+            {q.options.map((opt) => {
+              const selected = value === opt.id;
+              return (
+                <label
+                  key={opt.id}
+                  className={`flex items-center gap-3 cursor-pointer rounded-lg border px-4 py-3 transition-colors ${
+                    selected
+                      ? "border-secondary bg-secondary-fixed/10 ring-1 ring-secondary"
+                      : "border-outline-variant/25 bg-surface"
+                  }`}
+                >
+                  <input
+                    checked={selected}
+                    className="accent-secondary w-4 h-4 shrink-0"
+                    name={`round2-${q.id}`}
+                    type="radio"
+                    value={opt.id}
+                    onChange={() => updateSecondRoundAnswer(q.id, opt.id)}
+                  />
+                  <span className="font-body text-sm text-on-surface">{opt.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      );
+    }
+
+    if (q.input_type === "multi_choice" && q.options) {
+      const selected = Array.isArray(value) ? value : [];
+      return (
+        <fieldset className="border-0 p-0 m-0 mb-16" key={q.id}>
+          <legend className="text-sm font-semibold text-on-surface mb-3 block">
+            {q.prompt}
+            {q.required ? (
+              <span className="text-error ml-1" aria-hidden>
+                *
+              </span>
+            ) : null}
+          </legend>
+          {q.helper_text ? (
+            <p className="text-xs text-on-surface-variant font-body mb-3">{q.helper_text}</p>
+          ) : null}
+          <div className="flex flex-col gap-2">
+            {q.options.map((opt) => {
+              const checked = selected.includes(opt.id);
+              return (
+                <label
+                  key={opt.id}
+                  className={`flex items-center gap-3 cursor-pointer rounded-lg border px-4 py-3 transition-colors ${
+                    checked
+                      ? "border-secondary bg-secondary-fixed/10 ring-1 ring-secondary"
+                      : "border-outline-variant/25 bg-surface"
+                  }`}
+                >
+                  <input
+                    checked={checked}
+                    className="accent-secondary w-4 h-4 shrink-0"
+                    type="checkbox"
+                    onChange={() => toggleSecondRoundMultiChoice(q, opt.id)}
+                  />
+                  <span className="font-body text-sm text-on-surface">{opt.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </fieldset>
+      );
+    }
+
+    if (q.input_type === "text") {
+      const textVal = typeof value === "string" ? value : "";
+      return (
+        <div key={q.id}>
+          <label
+            className="block text-sm font-semibold text-on-surface mb-2"
+            htmlFor={`followup-round2-${q.id}`}
+          >
+            {q.prompt}
+            {q.required ? (
+              <span className="text-error ml-1" aria-hidden>
+                *
+              </span>
+            ) : null}
+          </label>
+          {q.helper_text ? (
+            <p className="text-xs text-on-surface-variant font-body mb-2">{q.helper_text}</p>
+          ) : null}
+          <textarea
+            className="w-full min-h-[120px] bg-surface border border-outline-variant/30 text-on-surface text-sm rounded-xl px-4 py-3 font-body leading-relaxed focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary placeholder:text-on-surface-variant/50 shadow-inner resize-y"
+            id={`followup-round2-${q.id}`}
+            value={textVal}
+            onChange={(e) => updateSecondRoundAnswer(q.id, e.target.value)}
+          />
+        </div>
+      );
+    }
+
+    if (q.input_type === "scale_1_10") {
+      const min = q.scale_min ?? 1;
+      const max = q.scale_max ?? 10;
+      const numeric = typeof value === "number" && Number.isFinite(value) ? value : min;
+      const ticks = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+      return (
+        <div key={q.id}>
+          <p className="text-sm font-semibold text-on-surface mb-2">
+            {q.prompt}
+            {q.required ? (
+              <span className="text-error ml-1" aria-hidden>
+                *
+              </span>
+            ) : null}
+          </p>
+          {q.helper_text ? (
+            <p className="text-xs text-on-surface-variant mb-4 font-body">{q.helper_text}</p>
+          ) : null}
+          <div className="bg-surface px-5 py-6 rounded-xl border border-outline-variant/10">
+            <div className="flex justify-between text-xs font-semibold text-primary mb-3 px-1 gap-1 overflow-x-auto">
+              {ticks.map((t) => (
+                <span key={t} className="shrink-0">
+                  {t}
+                </span>
+              ))}
+            </div>
+            <input
+              aria-valuemax={max}
+              aria-valuemin={min}
+              aria-valuenow={numeric}
+              className="w-full"
+              max={max}
+              min={min}
+              type="range"
+              value={numeric}
+              onChange={(e) => updateSecondRoundAnswer(q.id, Number(e.target.value))}
+            />
+            <div className="flex justify-between text-xs text-on-surface-variant mt-3 px-1 font-medium">
+              <span>{q.scale_min_label ?? "Low"}</span>
+              <span className="text-on-surface font-semibold">{numeric}</span>
+              <span className="text-error font-bold">{q.scale_max_label ?? "High"}</span>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const followupRound1Busy = pendingRequest === "followup_round_2" || resultsLoading;
 
   return (
     <div className="flex-1 overflow-y-auto p-4 md:p-10 lg:p-12 pb-16">
@@ -1183,7 +1465,7 @@ const SymptomCheckPage: React.FC = () => {
           <div className="space-y-6">
             <div
               className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
-                resultsLoading ? "opacity-40" : "opacity-100"
+                followupRound1Busy ? "opacity-40" : "opacity-100"
               }`}
             >
               <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
@@ -1191,8 +1473,8 @@ const SymptomCheckPage: React.FC = () => {
                 <h3 className="text-sm font-bold text-primary mb-1 font-headline">Follow-up questions</h3>
                 <p className="text-sm text-on-surface-variant font-body leading-relaxed">
                   These questions were generated from your symptom description to mirror what a
-                  clinician might ask next. Your answers refine the illustrative assessment shown in
-                  the results step.
+                  clinician might ask next. After you answer, we will check whether a bit more detail
+                  helps before showing possible conditions.
                 </p>
               </div>
             </div>
@@ -1200,7 +1482,7 @@ const SymptomCheckPage: React.FC = () => {
             <div className="relative">
               <section
                 className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
-                  resultsLoading ? "opacity-35 pointer-events-none" : "opacity-100"
+                  followupRound1Busy ? "opacity-35 pointer-events-none" : "opacity-100"
                 }`}
               >
                 <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
@@ -1226,6 +1508,8 @@ const SymptomCheckPage: React.FC = () => {
                       setStep("intake");
                       setFollowUpQuestions([]);
                       setFollowUpAnswers({});
+                      setSecondFollowUpQuestions([]);
+                      setSecondFollowUpAnswers({});
                       setLlmError(null);
                     }}
                   >
@@ -1233,7 +1517,105 @@ const SymptomCheckPage: React.FC = () => {
                   </button>
                   <button
                     className="cursor-pointer gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed sm:ml-auto"
-                    disabled={!followUpValid || resultsLoading}
+                    disabled={!followUpValid || followupRound1Busy}
+                    type="button"
+                    onClick={() => void handleCheckAndProceed()}
+                  >
+                    {pendingRequest === "followup_round_2"
+                      ? "Evaluating…"
+                      : resultsLoading
+                        ? "Analyzing responses…"
+                        : "Continue"}
+                    <span className="material-symbols-outlined text-lg">monitoring</span>
+                  </button>
+                </div>
+              </section>
+
+              {followupRound1Busy ? (
+                <div
+                  className="absolute left-0 right-0 top-0 z-10 flex justify-center px-4 pt-4 md:px-8 md:pt-6"
+                  aria-live="polite"
+                >
+                  <div className="w-full max-w-3xl rounded-xl bg-surface-container-lowest/95 backdrop-blur-[2px] border border-outline-variant/20 p-4 md:p-5 shadow-ambient space-y-3 transition-opacity duration-300 ease-out">
+                    <p className="text-sm font-semibold text-primary font-headline">
+                      {pendingRequest === "followup_round_2"
+                        ? "Evaluating your answers…"
+                        : "Analyzing your responses…"}
+                    </p>
+                    <LinearLoadingBar
+                      estimatedSeconds={30}
+                      label={
+                        pendingRequest === "followup_round_2"
+                          ? "Evaluating your answers"
+                          : "Analyzing your responses"
+                      }
+                      progress={
+                        pendingRequest === "followup_round_2" ? roundTwoRequestProgress : resultsProgress
+                      }
+                    />
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
+
+        {step === "followup_round_2" && (
+          <div className="space-y-6">
+            <div
+              className={`bg-surface-container-low rounded-xl p-5 border border-outline-variant/10 flex items-start gap-3 transition-opacity duration-300 ${
+                resultsLoading ? "opacity-40" : "opacity-100"
+              }`}
+            >
+              <span className="material-symbols-outlined text-primary mt-0.5">auto_awesome</span>
+              <div>
+                <h3 className="text-sm font-bold text-primary mb-1 font-headline">
+                  Additional clarifying questions
+                </h3>
+                <p className="text-sm text-on-surface-variant font-body leading-relaxed">
+                  Based on your answers, we need a bit more detail to narrow the illustrative
+                  assessment. Please answer the questions below.
+                </p>
+              </div>
+            </div>
+
+            <div className="relative">
+              <section
+                className={`bg-surface-container-lowest rounded-xl p-6 md:p-8 shadow-ambient border-ghost transition-opacity duration-300 ease-out ${
+                  resultsLoading ? "opacity-35 pointer-events-none" : "opacity-100"
+                }`}
+              >
+                <h2 className="text-xl font-headline font-bold text-primary mb-6 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-secondary">quiz</span>
+                  Additional questions
+                </h2>
+
+                <div className="space-y-10">
+                  {secondFollowUpQuestions.map((question) => renderSecondRoundQuestion(question))}
+                </div>
+
+                {llmError ? (
+                  <p className="mt-8 text-sm text-error font-body" role="alert">
+                    {llmError}
+                  </p>
+                ) : null}
+
+                <div className="flex flex-col sm:flex-row gap-3 mt-10 pt-6 border-t border-outline-variant/15">
+                  <button
+                    className="cursor-pointer px-6 py-2.5 rounded-lg font-headline font-semibold text-sm border border-outline-variant/40 text-primary hover:bg-surface-container transition-colors"
+                    type="button"
+                    onClick={() => {
+                      setStep("followup");
+                      setSecondFollowUpQuestions([]);
+                      setSecondFollowUpAnswers({});
+                      setLlmError(null);
+                    }}
+                  >
+                    Back
+                  </button>
+                  <button
+                    className="cursor-pointer gradient-primary text-on-primary px-8 py-2.5 rounded-lg font-headline font-semibold text-sm hover:shadow-[0_4px_12px_rgba(0,55,111,0.2)] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:pointer-events-none disabled:cursor-not-allowed sm:ml-auto"
+                    disabled={!secondFollowUpValid || resultsLoading}
                     type="button"
                     onClick={() => void handleSeeResults()}
                   >

@@ -8,6 +8,7 @@
  */
 import axios from "axios";
 import followupContext from "./prompts/followup_context.txt?raw";
+import followupRound2Context from "./prompts/followup_round2_context.txt?raw";
 import resultsContext from "./prompts/results_context.txt?raw";
 import { apiClient } from "../api/client";
 import { parseJsonObjectFromLlm } from "./parseLlmJson";
@@ -89,6 +90,30 @@ export async function requestFollowUpQuestions(input: {
     session_id: res.session_id,
   };
   return out;
+}
+
+/** Second round of follow-up questions: based on first round answers to narrow further. */
+export async function requestSecondFollowUpQuestions(input: {
+  symptoms: string;
+  insuranceLabel: string;
+  firstRoundAnswers: StructuredFollowUpAnswer[];
+  /** Same `SymptomSession.public_id` as round 1 so Django appends to one survey session. */
+  sessionId: string;
+}): Promise<FollowUpQuestionsPayload> {
+  const body: SymptomLlmRequestBody = {
+    phase: "followup_questions_round_2",
+    system_prompt: followupRound2Context.trim(),
+    user_payload: {
+      symptoms: input.symptoms,
+      insurance_label: input.insuranceLabel,
+      first_round_answers: input.firstRoundAnswers,
+    },
+    session_id: input.sessionId,
+  };
+
+  const res = await postSymptomSurveyLlm(body);
+  const parsed = parseJsonObjectFromLlm(res.raw_text);
+  return validateFollowUpQuestionsPayload(parsed);
 }
 
 /** Snapshot sent back to the model on call 2 (ids tie answers to prompts). */

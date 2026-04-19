@@ -57,7 +57,7 @@ export type SymptomResultsPayload = {
   care_taxonomy: CareTaxonomy;
 };
 
-export type SymptomLlmPhase = "followup_questions" | "condition_assessment";
+export type SymptomLlmPhase = "followup_questions" | "followup_questions_round_2" | "condition_assessment";
 
 /** POST body for `POST /api/symptom/survey-llm/` (matches `SymptomSurveyLlmSerializer`). */
 export type SymptomLlmRequestBody = {
