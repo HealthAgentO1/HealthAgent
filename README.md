@@ -21,10 +21,10 @@ Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/890
 <table>
   <tr>
     <td align="center" width="50%">
-      <a href="https://www.linkedin.com/in/cgombert/"><img src="images/team/carl-gombert.jpg" width="120" height="120" alt="Carl Gombert" /></a>
+      <a href="https://www.linkedin.com/in/nicolas-garcia-bompadre/"><img src="images/team/nico-garcia-bompadre.jpg" width="120" height="120" alt="Nico García-Bompadre" /></a>
       <br /><br />
-      <a href="https://www.linkedin.com/in/cgombert/"><b>Carl Gombert</b></a>
-      <br /><sub><b>Platform &amp; AI engineer</b><br />Core APIs, AI clinical intake &amp; medication checks</sub>
+      <a href="https://www.linkedin.com/in/nicolas-garcia-bompadre/"><b>Nico García-Bompadre</b></a>
+      <br /><sub><b>Full-stack engineer</b><br />Provider data, reports &amp; medication services</sub>
     </td>
     <td align="center" width="50%">
       <a href="https://www.linkedin.com/in/zandermmcg/"><img src="images/team/zander-mcginley.jpg" width="120" height="120" alt="Zander McGinley" /></a>
@@ -35,10 +35,10 @@ Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/890
   </tr>
   <tr>
     <td align="center" width="50%">
-      <a href="https://www.linkedin.com/in/nicolas-garcia-bompadre/"><img src="images/team/nico-garcia-bompadre.jpg" width="120" height="120" alt="Nico García-Bompadre" /></a>
+      <a href="https://www.linkedin.com/in/cgombert/"><img src="images/team/carl-gombert.jpg" width="120" height="120" alt="Carl Gombert" /></a>
       <br /><br />
-      <a href="https://www.linkedin.com/in/nicolas-garcia-bompadre/"><b>Nico García-Bompadre</b></a>
-      <br /><sub><b>Full-stack engineer</b><br />Provider data, reports &amp; medication services</sub>
+      <a href="https://www.linkedin.com/in/cgombert/"><b>Carl Gombert</b></a>
+      <br /><sub><b>Platform &amp; AI engineer</b><br />Core APIs, AI clinical intake &amp; medication checks</sub>
     </td>
     <td align="center" width="50%">
       <a href="https://www.linkedin.com/in/peter-mckinley-2b4b46294/"><img src="images/team/peter-mckinley.jpg" width="120" height="120" alt="Peter McKinley" /></a>
