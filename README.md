@@ -30,7 +30,7 @@ Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/890
       <a href="https://www.linkedin.com/in/zandermmcg/"><img src="images/team/zander-mcginley.jpg" width="120" height="120" alt="Zander McGinley" /></a>
       <br /><br />
       <a href="https://www.linkedin.com/in/zandermmcg/"><b>Zander McGinley</b></a>
-      <br /><sub><b>Full-stack and product engineer</b><br />Symptom stack UI-to-API, medication safety flows</sub>
+      <br /><sub><b>Full-stack & product engineer</b><br />Symptom stack UI-to-API, medication safety flows</sub>
     </td>
   </tr>
   <tr>
