@@ -332,14 +332,14 @@ const ReportsPage: React.FC = () => {
                 </div>
               ) : selected ? (
                 <>
-                  <div className="mb-2 flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0 shrink sm:max-w-[min(100%,26rem)] sm:pr-2">
+                  <div className="mb-2 flex min-w-0 flex-col gap-3">
+                    <div className="min-w-0">
                       <h2 className="font-headline text-xl font-bold text-primary mb-1">Pre-visit summary</h2>
                       <p className="font-body text-xs text-on-surface-variant">
                         {formatSessionTimestamp(selected.created_at)}
                       </p>
                     </div>
-                    <div className="flex min-w-0 w-full flex-wrap items-center justify-start gap-2 sm:w-auto sm:max-w-full sm:flex-1 sm:justify-end">
+                    <div className="flex min-w-0 w-full flex-wrap items-center gap-2">
                       <button
                         type="button"
                         disabled={pdfBusy}

@@ -4,9 +4,9 @@
 
 # HealthOS
 
-**Autonomous symptom-to-care and medication safety**
+**Symptom-to-care and medication safety**
 
-AI-assisted triage, care routing, and medication monitoring — backed by a Django API and a React dashboard.
+**Autonomous AI** runs guided symptom-to-care interviews, care-setting suggestions, nearby facility lookup, regimen tracking, and **openFDA**-backed interaction and recall checks. Under the hood this is a **React** + **TypeScript** App on a **Django REST** API and **PostgreSQL**. **Educational tooling only**—not emergency care, not a diagnosis, and not a replacement for a clinician.
 
 Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/89099bfc-93b8-4a9a-be53-ded2bf0ac17d
 
@@ -14,61 +14,46 @@ Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/890
 
 ---
 
-## Project description
+## Team behind HealthOS
 
-**Problem.** People with new or changing symptoms often lack a straightforward way to judge how urgently they need care, which setting is appropriate, and how to find and prepare for a visit. Separately, keeping an accurate medication picture and sharing the right context with a clinician is easy to get wrong. The result is unnecessary friction from first symptoms through booking and the clinical encounter.
+<div align="center">
 
-**What we are building.** HealthOS addresses that gap with structured, AI-assisted **symptom-to-care** (educational triage-style guidance, routing hooks, and pre-visit summaries) and **medication safety** (regimen tracking and interaction-oriented checks). The product aims to reduce friction on the path from symptoms to appropriate care and safer medication use — not to replace emergency services, definitive diagnosis, or the clinician–patient relationship.
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://www.linkedin.com/in/cgombert/"><img src="images/team/carl-gombert.jpg" width="120" height="120" alt="Carl Gombert" /></a>
+      <br /><br />
+      <a href="https://www.linkedin.com/in/cgombert/"><b>Carl Gombert</b></a>
+      <br /><sub><b>Platform &amp; AI engineer</b><br />Core APIs, AI clinical intake &amp; medication checks</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="https://www.linkedin.com/in/zandermmcg/"><img src="images/team/zander-mcginley.jpg" width="120" height="120" alt="Zander McGinley" /></a>
+      <br /><br />
+      <a href="https://www.linkedin.com/in/zandermmcg/"><b>Zander McGinley</b></a>
+      <br /><sub><b>Full-stack and product engineer</b><br />Symptom stack UI-to-API, medication safety flows</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="https://www.linkedin.com/in/nicolas-garcia-bompadre/"><img src="images/team/nico-garcia-bompadre.jpg" width="120" height="120" alt="Nico García-Bompadre" /></a>
+      <br /><br />
+      <a href="https://www.linkedin.com/in/nicolas-garcia-bompadre/"><b>Nico García-Bompadre</b></a>
+      <br /><sub><b>Full-stack engineer</b><br />Provider data, reports &amp; medication services</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="https://www.linkedin.com/in/peter-mckinley-2b4b46294/"><img src="images/team/peter-mckinley.jpg" width="120" height="120" alt="Peter McKinley" /></a>
+      <br /><br />
+      <a href="https://www.linkedin.com/in/peter-mckinley-2b4b46294/"><b>Peter McKinley</b></a>
+      <br /><sub><b>Full-stack engineer</b><br />Clinical summaries &amp; medication safety logic</sub>
+    </td>
+  </tr>
+</table>
 
----
-
-## Overview
-
-HealthOS combines two complementary flows:
-
-| Area | What it does |
-|------|----------------|
-| **Symptom-to-care** | Guided symptom intake, triage-style assessment, care setting suggestions, and pre-visit context for clinicians. |
-| **Medication safety** | Active regimen tracking in the browser, interaction checks (e.g. openFDA), and safety-oriented medication workflows. |
-
-The stack is a **Django REST** backend with **PostgreSQL**, a **DeepSeek**-hosted LLM (OpenAI-compatible HTTPS), and a **React + TypeScript + Vite** frontend. **Docker Compose** runs the **database and Django API** together (see `docker-compose.yml`). The **frontend** is usually run on the host with Vite. See `docs/` for deeper architecture and agent notes.
-
----
-
-## Features
-
-### Symptom-to-care
-
-- **Guided intake** — Structured symptom narrative, insurer context, and LLM-assisted follow-up questions.
-- **Prior diagnoses for the LLM** — Optional context from **My prior diagnoses** and official labels saved after past symptom checks; when enabled on intake, deduplicated diagnosis text is sent to the first survey LLM call (`prior_official_diagnoses`) so follow-up questions and assessment can account for documented history.
-- **Post-visit doctor diagnosis** — On completed checks, record the clinician’s official diagnosis after a visit (including post-operative follow-up when that is what was documented) as **post-visit diagnosis**, so it appears on Reports and can be reused as prior context on future symptom checks.
-- **Triage-style output** — Severity and urgency framing with educational (non-diagnostic) language.
-- **Care routing** — Suggested care settings and taxonomy-aware routing hooks (e.g. NUCC-aligned facility search via **NPPES**).
-- **Provider & facility discovery** — Search and map-style workflows for nearby care options where integrated.
-- **Sessions** — Save, list, resume, and delete triage sessions; deep links from the dashboard.
-- **Pre-visit handoff** — After the structured survey finishes, Django generates a clinician-oriented **`pre_visit_report`** on the symptom session. The report’s medication list prefers the user’s **Medication Safety** active regimen (dosage, frequency, time, refill) sent from the browser on the final LLM step; it can fall back to the latest server **`MedicationProfile`** when needed. Patient-facing copy and PDF export live on **Reports** (`/reports`); **View report** refetches session history, opens the matching check via **`?session=`**, and scrolls the app shell to the top (see `docs/architecture.md`).
-
-### Medication safety
-
-- **Active regimen** — Add and edit medications in the UI; regimen persisted in **`localStorage`** for quick iteration.
-- **LLM extraction** — Optional structured extraction from prescription-style text via the API.
-- **openFDA integration** — Drug–drug interaction checks and recall-oriented signals (see `api/tests/` and `docs/medication-safety.md`).
-- **Detail views** — Per-medication safety pages with scoring and contextual guidance.
-
-### Account & app shell
-
-- **JWT authentication** — Register, login, access, and refresh tokens (`djangorestframework-simplejwt`). The SPA **`AuthProvider`** validates access token **expiry** on load and refreshes or clears the session before treating the user as signed in (see `docs/architecture.md`).
-- **Dashboard** — Care pathway prompts, health snapshot (symptoms + meds), and recent session history.
-- **Emergency contacts** — Dedicated area for critical contact information.
-- **Reports** — Workspace for exports and report-related flows tied to the symptom journey.
+</div>
 
 ---
 
 ## Tech stack
-
-Colored icons below point at **SVG** assets (CDN). Same technologies are spelled out in text for screen readers and offline docs.
-
-<!-- Devicons v2.16.0 (SVG). DeepSeek whale: `images/tech/deepseek-whale.svg` (icon path from Wikimedia Commons File:DeepSeek_logo.svg). -->
 
 <div align="center">
 
@@ -85,6 +70,10 @@ Colored icons below point at **SVG** assets (CDN). Same technologies are spelled
     <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/postgresql/postgresql-original.svg" alt="PostgreSQL" title="PostgreSQL" />
       <div><sub><b>PostgreSQL</b></sub></div>
+    </td>
+    <td align="center" width="82">
+      <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/googlecloud/googlecloud-original.svg" alt="Google Cloud" title="Google Cloud" />
+      <div><sub><b>Google Cloud</b></sub></div>
     </td>
     <td align="center" width="82">
       <img height="44" width="44" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/docker/docker-plain.svg" alt="Docker" title="Docker" />
@@ -109,17 +98,62 @@ Colored icons below point at **SVG** assets (CDN). Same technologies are spelled
   </tr>
 </table>
 
-<sub>Python · Django · PostgreSQL · Docker · React · TypeScript · Tailwind CSS · DeepSeek</sub><br />
-
 </div>
 
-| Layer | Technologies |
-|--------|----------------|
-| **Backend** | Django 4.2, **Django REST Framework**, **SimpleJWT**, CORS headers, **Gunicorn**, **WhiteNoise**, **psycopg2**, `dj-database-url` |
-| **LLM** | **DeepSeek** **`deepseek-chat`** (`LLM_MODEL`). The backend calls DeepSeek’s **OpenAI-compatible** REST API using the official **`openai`** Python package as the HTTP client (`OPENAI_BASE_URL` / `DEEPSEEK_API_BASE`, keys via **`DEEPSEEK_API_KEY`** or **`OPENAI_API_KEY`** — see **`.env.example`**). **`tiktoken`** where token utilities are needed. |
-| **HTTP & config** | **`requests`** for external REST (e.g. openFDA, NPPES, Infermedica). **`python-dotenv`** and Django settings for environment. |
-| **Frontend** | React 19, React Router 7, **TanStack Query**, **Axios**, Tailwind CSS 4 (`@tailwindcss/vite`), ESLint, TypeScript |
-| **Tooling** | Vite 8, ESLint, **`npm run build`** (typecheck + bundle), **pytest** for the API, **Docker Compose** for local **Postgres + Django** |
+| Area | Technologies |
+|------|----------------|
+| **Backend** | Python, Django, PostgreSQL, Gunicorn |
+| **Infra** | Google Cloud, Docker, Docker Compose, GitHub Actions |
+| **Frontend** | TypeScript, React, Tailwind CSS |
+| **AI** | DeepSeek (OpenAI-compatible API) |
+
+---
+
+## What it does
+
+**Problem.** People with new or changing symptoms often lack a straightforward way to judge how urgently they need care, which setting is appropriate, and how to find and prepare for a visit. Separately, keeping an accurate medication picture and sharing the right context with a clinician is easy to get wrong. The result is unnecessary friction from first symptoms through booking and the clinical encounter.
+
+**What we are building.** HealthOS addresses that gap with structured, AI-assisted **symptom-to-care** (educational triage-style guidance, routing hooks, and pre-visit summaries) and **medication safety** (regimen tracking and interaction-oriented checks). The product aims to reduce friction on the path from symptoms to appropriate care and safer medication use — not to replace emergency services, definitive diagnosis, or the clinician–patient relationship.
+
+---
+
+## Overview
+
+HealthOS combines two complementary flows:
+
+| Area | What it does |
+|------|----------------|
+| **Symptom-to-care** | Guided symptom intake, triage-style assessment, care setting suggestions, and pre-visit context for clinicians. |
+| **Medication safety** | Active regimen tracking in the browser, interaction checks (e.g. openFDA), and safety-oriented medication workflows. |
+
+---
+
+## Features
+
+### Symptom-to-care
+
+- **Guided intake** — Structured symptom narrative, insurer context, and LLM-assisted follow-up questions.
+- **Prior diagnoses for the LLM** — Optional context from **My prior diagnoses** and official labels saved after past symptom checks; when enabled on intake, deduplicated diagnosis text is sent to the first survey LLM call (`prior_official_diagnoses`) so follow-up questions and assessment can account for documented history.
+- **Post-visit doctor diagnosis** — On completed checks, record the clinician’s official diagnosis after a visit (including post-operative follow-up when that is what was documented) as **post-visit diagnosis**, so it appears on Reports and can be reused as prior context on future symptom checks.
+- **Triage-style output** — Severity and urgency framing with educational (non-diagnostic) language.
+- **Care routing** — Suggested care settings and taxonomy-aware routing hooks (e.g. NUCC-aligned facility search via **NPPES**).
+- **Provider & facility discovery** — Search and map-style workflows for nearby care options where integrated.
+- **Sessions** — Save, list, resume, and delete triage sessions; deep links from the dashboard.
+- **Pre-visit handoff** — After the structured survey finishes, Django generates a clinician-oriented **`pre_visit_report`** on the symptom session. The report’s medication list prefers the user’s **Medication Safety** active regimen (dosage, frequency, time, refill) sent from the browser on the final LLM step; it can fall back to the latest server **`MedicationProfile`** when needed. Patient-facing copy and PDF export live on **Reports** (`/reports`); **View report** refetches session history, opens the matching check via **`?session=`**, and scrolls the app shell to the top (see `docs/architecture.md`).
+
+### Medication safety
+
+- **Active regimen** — Add and edit medications in the UI.
+- **LLM extraction** — Optional structured extraction from prescription-style text via the API.
+- **openFDA integration** — Drug–drug interaction checks and recall-oriented signals (see `api/tests/` and `docs/medication-safety.md`).
+- **Detail views** — Per-medication safety pages with scoring and contextual guidance.
+
+### Account & app shell
+
+- **JWT authentication** — Register, login, access, and refresh tokens (`djangorestframework-simplejwt`). The SPA **`AuthProvider`** validates access token **expiry** on load and refreshes or clears the session before treating the user as signed in (see `docs/architecture.md`).
+- **Dashboard** — Care pathway prompts, health snapshot (symptoms + meds), and recent session history.
+- **Emergency contacts** — Dedicated area for critical contact information.
+- **Reports** — Workspace for exports and report-related flows tied to the symptom journey.
 
 ---
 
@@ -129,7 +163,7 @@ Two agent areas share the same API and database. **Locally, Compose runs Postgre
 
 ```
 Docker Compose (docker compose up)
-├── db          PostgreSQL 14 — port 5432, persistent volume
+├── db          PostgreSQL — port 5432, persistent volume
 └── django      Django REST API — port 8000, migrate on start, bind-mounted source
 
 frontend (Vite dev server on host) ──HTTP──► django:8000
