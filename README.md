@@ -8,7 +8,6 @@
 
 **Autonomous AI** runs guided symptom-to-care interviews, care-setting suggestions, nearby facility lookup, regimen tracking, and **openFDA**-backed interaction and recall checks. Under the hood this is a **React** + **TypeScript** App on a **Django REST** API and **PostgreSQL**. **Educational tooling only**—not emergency care, not a diagnosis, and not a replacement for a clinician.
 
-Live site: https://health-guardian-frontend-875209953481.us-central1.run.app/89099bfc-93b8-4a9a-be53-ded2bf0ac17d
 
 </div>
 
